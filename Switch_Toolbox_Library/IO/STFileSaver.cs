@@ -330,7 +330,24 @@ namespace Toolbox.Library.IO
                 System.Diagnostics.Stopwatch sw = new System.Diagnostics.Stopwatch();
                 sw.Start();
 
-                var comp = compressionFormat.Compress(data);
+                Stream comp;
+                try
+                {
+                    comp = compressionFormat.Compress(data);
+                }
+                catch (Exception ex)
+                {
+                    data.Position = 0;
+                    MessageBox.Show($"Compression failed ({compressionFormat}). File will be saved uncompressed.\n\n{ex.Message}", "Compression Error");
+                    return Tuple.Create(data, "");
+                }
+
+                if (comp == null || comp.Length == 0)
+                {
+                    data.Position = 0;
+                    MessageBox.Show($"Compression failed ({compressionFormat}). Output was empty. File will be saved uncompressed.", "Compression Error");
+                    return Tuple.Create(data, "");
+                }
                 sw.Stop();
                 TimeSpan ts = sw.Elapsed;
                 string message = string.Format("{0:D2}:{1:D2}:{2:D2}", ts.Minutes, ts.Seconds, ts.Milliseconds);

@@ -31,6 +31,9 @@ namespace FirstPlugin
 
         public bool IsSelected() => Selected;
 
+        private FMAT lastTextureMat = null;
+        private int lastTextureShaderId = -1;
+
         public BFRESRender()
         {
 
@@ -142,6 +145,9 @@ namespace FirstPlugin
             shader.UseProgram();
             control.UpdateModelMatrix(ModelTransform * Matrix4.CreateScale(Runtime.previewScale));
 
+            lastTextureMat = null;
+            lastTextureShaderId = shader.Id;
+
             Matrix4 camMat = control.CameraMatrix;
             Matrix4 mdlMat = control.ModelMatrix;
             Matrix4 projMat = control.ProjectionMatrix;
@@ -208,6 +214,8 @@ namespace FirstPlugin
             {
                 if (models[m].Checked)
                 {
+                    SetBoneUniforms(shader, models[m]);
+
                     List<FSHP> opaque = new List<FSHP>();
                     List<FSHP> transparent = new List<FSHP>();
 
@@ -224,9 +232,12 @@ namespace FirstPlugin
                         DrawModel(transparent[shp], models[m], shader, models[m].IsSelected);
                     }
 
-                    for (int shp = 0; shp < opaque.Count; shp++)
+                    foreach (var group in opaque.GroupBy(x => x.GetFMAT()))
                     {
-                        DrawModel(opaque[shp], models[m], shader, models[m].IsSelected);
+                        foreach (var shp in group)
+                        {
+                            DrawModel(shp, models[m], shader, models[m].IsSelected);
+                        }
                     }
                 }
             }
@@ -270,7 +281,7 @@ namespace FirstPlugin
             shader.SetBoolToInt("HasRoughnessMap", mat.HasRoughnessMap);
             shader.SetBoolToInt("HasMRA", mat.HasMRA);
         }
-        private static void SetBoneUniforms(SF.Shader shader, FMDL fmdl, FSHP fshp)
+        private static void SetBoneUniforms(SF.Shader shader, FMDL fmdl)
         {
             for (int i = 0; i < fmdl.Skeleton.Node_Array.Length; i++)
             {
@@ -442,14 +453,6 @@ namespace FirstPlugin
                         return BindBNTX(bntx, tex, shader, activeTex);
                     }
                 }
-
-                foreach (var bntx in PluginRuntime.bntxContainers)
-                {
-                    if (bntx.Textures.ContainsKey(activeTex))
-                    {
-                        return BindBNTX(bntx, tex, shader, activeTex);
-                    }
-                }
                 if (PluginRuntime.TextureCache.ContainsKey(activeTex))
                 {
                     var t = PluginRuntime.TextureCache[activeTex];
@@ -528,9 +531,13 @@ namespace FirstPlugin
                 SetRenderSettings(shader, useVertexColors);
                 SetRenderPass(mat);
                 SetUniforms(mat, shader, m, m.DisplayId);
-                SetTextureUniforms(mat, m, shader);
+                if (mat != lastTextureMat || shader.Id != lastTextureShaderId)
+                {
+                    SetTextureUniforms(mat, m, shader);
+                    lastTextureMat = mat;
+                    lastTextureShaderId = shader.Id;
+                }
             }
-            SetBoneUniforms(shader, mdl, m);
             ApplyTransformFix(mdl, m, shader);
             SetVertexAttributes(m, shader);
 

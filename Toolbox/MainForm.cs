@@ -14,6 +14,7 @@ using Toolbox.Library.Forms;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Reflection;
+using Microsoft.Win32.SafeHandles;
 using OpenTK.Graphics.OpenGL;
 using Toolbox.Library.NodeWrappers;
 using Toolbox.Library.Rendering;
@@ -21,6 +22,7 @@ using Bfres.Structs;
 using Syroot.NintenTools.NSW.Bntx;
 using static System.Windows.Forms.VisualStyles.VisualStyleElement.Window;
 using FirstPlugin;
+
 
 namespace Toolbox
 {
@@ -31,6 +33,31 @@ namespace Toolbox
 
         IFileFormat[] SupportedFormats;
         IFileMenuExtension[] FileMenuExtensions;
+
+        [DllImport("kernel32.dll")]
+        private static extern bool AllocConsole();
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetConsoleWindow();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GetStdHandle(int nStdHandle);
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool WriteConsole(IntPtr hConsoleOutput, string lpBuffer, uint nNumberOfCharsToWrite, out uint lpNumberOfCharsWritten, IntPtr lpReserved);
+
+        private const int STD_OUTPUT_HANDLE = -11;
+        private const int STD_ERROR_HANDLE = -12;
+        private const int SW_HIDE = 0;
+        private const int SW_SHOW = 5;
+        private const int SW_RESTORE = 9;
+        private static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
 
         public void AddChildContainer(Form form)
         {
@@ -71,6 +98,21 @@ namespace Toolbox
         {
             Runtime.MainForm = this;
             compressionToolStripMenuItem.DropDownItems.AddRange(CompressionMenus.GetMenuItems().ToArray());
+            foreach (ToolStripItem item in compressionToolStripMenuItem.DropDownItems)
+            {
+                if (item.Text.Contains("ZSTD"))
+                {
+                    compressionToolStripMenuItem.DropDownItems.Remove(item);
+                    item.Text = "ZSTD";
+                    menuStrip1.Items.Add(item);
+                    break;
+                }
+            }
+            // Open on toolbar
+            fileToolStripMenuItem.DropDownItems.Remove(openToolStripMenuItem);
+            openToolStripMenuItem.Text = "Open";
+            int fileIndex = menuStrip1.Items.IndexOf(fileToolStripMenuItem);
+            menuStrip1.Items.Insert(fileIndex + 1, openToolStripMenuItem);
 
             //Redo setting this since designer keeps resetting this
             tabForms.myBackColor = FormThemes.BaseTheme.FormBackColor;
@@ -188,22 +230,22 @@ namespace Toolbox
         bool UsePrompt = true;
         private void Application_Idle(object sender, EventArgs e)
         {
-            if (UpdateProgram.CanUpdate && Runtime.EnableVersionCheck && UsePrompt &&
-                UpdateProgram.CommitList.Count > 0)
+            if (UpdateProgram.CanUpdate && Runtime.EnableVersionCheck && UsePrompt)
             {
                 updateToolstrip.Enabled = true;
                 UsePrompt = false;
+                UpdateNotifcationClick();
             }
         }
 
 
         private void UpdateNotifcationClick()
         {
-            if (UpdateProgram.CommitList.Count <= 0)
+            if (!UpdateProgram.CanUpdate)
                 return;
 
             var dialog = new GithubUpdateDialog();
-            dialog.LoadCommits(UpdateProgram.CommitList);
+            dialog.LoadPatchNotes(UpdateProgram.LatestReleaseTitle, UpdateProgram.PatchNotes);
             if (dialog.ShowDialog() == DialogResult.Yes)
             {
                 UpdateApplication();
@@ -649,12 +691,14 @@ namespace Toolbox
 
         private void UpdateToolbar(bool DisplayVersion)
         {
-            string commit = $"Commit: {Runtime.CommitInfo}";
-            var asssemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
+            string versionText = Runtime.ProgramVersion;
+            if (string.IsNullOrWhiteSpace(versionText))
+                versionText = "Development";
+
             if (DisplayVersion)
-                Text = $"{Application.ProductName} | Version: {Runtime.ProgramVersion} | {commit} | Compile Date: {Runtime.CompileDate} Assembly {asssemblyVersion}";
+                Text = $"{Application.ProductName} - Splatoon 3 Fork | Version: {versionText}";
             else
-                Text = $"{Application.ProductName}";
+                Text = $"{Application.ProductName} - Splatoon 3 Fork";
         }
 
         private void LoadPLugins()
@@ -692,6 +736,8 @@ namespace Toolbox
              //   if (ext.MapEditorMenuExtensions != null)
                //     RegisterMenuExtIndex(mapEditorsToolStripMenuItem, ext.MapEditorMenuExtensions, mapEditorsToolStripMenuItem.DropDownItems.Count);
             }
+
+            EnsureToolsMenuPriority();
         }
 
         private void LoadPluginFileContextMenus()
@@ -711,6 +757,39 @@ namespace Toolbox
                 if (ext.CompressionMenuExtensions != null)
                     RegisterMenuExtIndex(compressionToolStripMenuItem, ext.CompressionMenuExtensions, compressionToolStripMenuItem.DropDownItems.Count);
             }
+
+            EnsureToolsMenuPriority();
+        }
+
+        private void EnsureToolsMenuPriority()
+        {
+            MoveDropDownItemToTop(toolsToolStripMenuItem, "Splatoon 3");
+        }
+
+        private void MoveDropDownItemToTop(ToolStripMenuItem target, string text)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(text))
+                return;
+
+            ToolStripItem found = null;
+            foreach (ToolStripItem item in target.DropDownItems)
+            {
+                if (item.Text == text)
+                {
+                    found = item;
+                    break;
+                }
+            }
+
+            if (found == null)
+                return;
+
+            int index = target.DropDownItems.IndexOf(found);
+            if (index <= 0)
+                return;
+
+            target.DropDownItems.RemoveAt(index);
+            target.DropDownItems.Insert(0, found);
         }
         void RegisterMenuExtIndex(ToolStrip target, ToolStripButton[] list, int index = 0)
         {
@@ -1325,16 +1404,91 @@ namespace Toolbox
             }
         }
 
-        STConsoleForm form;
-
         private void consoleToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (form == null || form.IsDisposed)
+            ToggleConsoleWindow();
+        }
+
+        private void ToggleConsoleWindow()
+        {
+            IntPtr consoleWindow = GetConsoleWindow();
+
+            if (consoleWindow == IntPtr.Zero)
             {
-                form = new STConsoleForm();
-                form.Show(this);
+                if (!AllocConsole())
+                    return;
+
+                AttachConsoleStreams();
+                WriteTerminalLine("[Toolbox] Console window enabled");
+                STConsole.WriteLine("[Toolbox] Console window enabled");
+
+                consoleWindow = GetConsoleWindow();
+                if (consoleWindow != IntPtr.Zero)
+                {
+                    ShowWindow(consoleWindow, SW_SHOW);
+                    ShowWindow(consoleWindow, SW_RESTORE);
+                }
+
+                consoleToolStripMenuItem.Checked = true;
+                return;
             }
-            form.Focus();
+
+            bool isVisible = IsWindowVisible(consoleWindow);
+            if (isVisible)
+            {
+                ShowWindow(consoleWindow, SW_HIDE);
+                consoleToolStripMenuItem.Checked = false;
+            }
+            else
+            {
+                ShowWindow(consoleWindow, SW_SHOW);
+                ShowWindow(consoleWindow, SW_RESTORE);
+                consoleToolStripMenuItem.Checked = true;
+                WriteTerminalLine("[Console] Terminal window shown.");
+                STConsole.WriteLine("[Console] Terminal window shown.");
+            }
+        }
+
+        private void AttachConsoleStreams()
+        {
+            AttachStandardWriter(STD_OUTPUT_HANDLE, Console.SetOut);
+            AttachStandardWriter(STD_ERROR_HANDLE, Console.SetError);
+        }
+
+        private void AttachStandardWriter(int stdHandle, Action<TextWriter> setWriter)
+        {
+            try
+            {
+                IntPtr handle = GetStdHandle(stdHandle);
+                if (handle == IntPtr.Zero || handle == INVALID_HANDLE_VALUE)
+                    return;
+
+                FileStream stream = new FileStream(new SafeFileHandle(handle, false), FileAccess.Write);
+                StreamWriter writer = new StreamWriter(stream) { AutoFlush = true };
+                setWriter(writer);
+            }
+            catch { }
+        }
+
+        private void WriteTerminalLine(string message)
+        {
+            try
+            {
+                Console.WriteLine(message);
+                return;
+            }
+            catch { }
+
+            try
+            {
+                IntPtr output = GetStdHandle(STD_OUTPUT_HANDLE);
+                if (output == IntPtr.Zero || output == INVALID_HANDLE_VALUE)
+                    return;
+
+                string text = $"{message}{Environment.NewLine}";
+                WriteConsole(output, text, (uint)text.Length, out _, IntPtr.Zero);
+            }
+            catch { }
         }
 
         private void aboutToolStripMenuItem1_Click(object sender, EventArgs e)
@@ -1345,15 +1499,15 @@ namespace Toolbox
 
         private void githubToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            System.Diagnostics.Process.Start("https://github.com/KillzXGaming/Switch-Toolbox");
+            System.Diagnostics.Process.Start("https://github.com/cakezara/Splatoon3-Toolbox");
         }
 
         private void reportBugToolStripMenuItem_Click(object sender, EventArgs e) {
-            System.Diagnostics.Process.Start("https://github.com/KillzXGaming/Switch-Toolbox/issues");
+            System.Diagnostics.Process.Start("https://github.com/cakezara/Splatoon3-Toolbox/issues");
         }
 
         private void requestFeatureToolStripMenuItem1_Click(object sender, EventArgs e) {
-            System.Diagnostics.Process.Start("https://github.com/KillzXGaming/Switch-Toolbox/issues");
+            System.Diagnostics.Process.Start("https://github.com/cakezara/Splatoon3-Toolbox/issues");
         }
 
         private void tutorialToolStripMenuItem_Click(object sender, EventArgs e) {

@@ -194,6 +194,7 @@ namespace FirstPlugin.Forms
                 return;
 
             ReloadDrawableList();
+            ApplyBfresViewportDefaults(bfres);
 
             if (customContextMenus != null)
             {
@@ -202,6 +203,30 @@ namespace FirstPlugin.Forms
             }
 
             OnLoadedTab();
+        }
+
+        private void ApplyBfresViewportDefaults(BFRES bfres)
+        {
+            if (bfres == null)
+                return;
+
+            string path = bfres.FilePath ?? bfres.FileName ?? "";
+            bool isBfresZs = path.EndsWith(".zs", StringComparison.OrdinalIgnoreCase) &&
+                             path.IndexOf(".bfres", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (!isBfresZs)
+                return;
+
+            // Default to freecam (walk) for bfres.zs
+            Runtime.cameraMovement = Runtime.CameraMovement.Walk;
+
+            var vp = GetViewport();
+            if (vp != null)
+            {
+                vp.LoadViewportRuntimeValues();
+                if (vp.GL_Control != null)
+                    vp.GL_Control.VSync = false;
+            }
         }
 
         private void ReloadDrawableList()

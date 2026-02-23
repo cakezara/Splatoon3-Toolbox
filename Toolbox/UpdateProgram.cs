@@ -1,31 +1,46 @@
 ﻿using System;
-using System.Linq;
 using System.Collections.Generic;
+using System.Configuration;
+using System.Linq;
+using System.Net;
 using System.Threading.Tasks;
 using Octokit;
-using System.IO;
-using System.Net;
-using System.Diagnostics;
-using System.Linq;
 using Toolbox.Library;
-using System.Reflection;
 
 namespace Toolbox
 {
+    public class UpdatePatchNote
+    {
+        public string Summary { get; set; }
+        public string Details { get; set; }
+        public string Date { get; set; }
+    }
+
     public class UpdateProgram
     {
         static List<Release> Releases = new List<Release>();
+        static readonly string RepositoryOwner = GetAppSetting("UpdateRepositoryOwner", "KillzXGaming");
+        static readonly string RepositoryName = GetAppSetting("UpdateRepositoryName", "Switch-Toolbox");
+        static readonly string ReleaseAssetName = GetAppSetting("UpdateReleaseAssetName", "");
+
         public static bool CanUpdate = false;
         public static bool Downloaded = false;
         public static Release LatestRelease;
-        public static List<GitHubCommit> CommitList = new List<GitHubCommit>();
+        public static List<UpdatePatchNote> PatchNotes = new List<UpdatePatchNote>();
+        public static string LatestReleaseTitle = "";
         public static DateTime LatestReleaseTime;
-
 
         public static void CheckLatest()
         {
             try
             {
+                CanUpdate = false;
+                Downloaded = false;
+                LatestRelease = null;
+                LatestReleaseTitle = "";
+                LatestReleaseTime = DateTime.MinValue;
+                PatchNotes.Clear();
+
                 VersionCheck versionCheck = new VersionCheck(true);
 
                 ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
@@ -37,23 +52,20 @@ namespace Toolbox
                 if (info != null && info.RateLimit.Remaining <= 0)
                     return;
 
-                GetCommits(client).Wait();
-
-                var asssemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
-                var version = string.Concat(asssemblyVersion.ToString().Reverse().Skip(2).Reverse());
-
-                var lastestRelease = Releases.FirstOrDefault();
-                if (lastestRelease != null && lastestRelease.Assets[0].UpdatedAt.ToString() == versionCheck.CompileDate)
+                var latestRelease = Releases.FirstOrDefault(x => GetPreferredAsset(x) != null);
+                var latestAsset = GetPreferredAsset(latestRelease);
+                if (latestRelease != null && latestAsset != null && latestAsset.UpdatedAt.ToString() == versionCheck.CompileDate)
                 {
-                    Runtime.ProgramVersion = lastestRelease.TagName;
-                    Runtime.CompileDate = lastestRelease.Assets[0].UpdatedAt.ToString();
-                    Runtime.CommitInfo = lastestRelease.TargetCommitish;
+                    Runtime.ProgramVersion = latestRelease.TagName;
+                    Runtime.CompileDate = latestAsset.UpdatedAt.ToString();
+                    Runtime.CommitInfo = latestRelease.TargetCommitish;
                     return;
                 }
 
                 foreach (Release latest in Releases)
                 {
-                    if (latest.Assets?.Count == 0)
+                    var asset = GetPreferredAsset(latest);
+                    if (asset == null)
                         continue;
 
                     Console.WriteLine(
@@ -61,79 +73,124 @@ namespace Toolbox
                         latest.TagName,
                         latest.Name,
                         latest.TargetCommitish,
-                        latest.Assets[0].UpdatedAt.ToString());
+                        asset.UpdatedAt.ToString());
 
-                    LatestReleaseTime = latest.Assets[0].UpdatedAt.DateTime;
+                    LatestReleaseTime = asset.UpdatedAt.DateTime;
                     LatestRelease = latest;
+                    LatestReleaseTitle = string.IsNullOrWhiteSpace(latest.Name) ? latest.TagName : latest.Name;
+                    LoadPatchNotes(latest);
                     CanUpdate = true;
-
                     break;
                 }
 
                 Releases.Clear();
             }
-            catch (Exception ex)
+            catch
             {
-            }
-        }
-
-        static void DownloadRelease()
-        {
-            ProcessStartInfo p = new ProcessStartInfo();
-            p.WindowStyle = ProcessWindowStyle.Hidden;
-            p.CreateNoWindow = true;
-            p.FileName = Path.Combine(Runtime.ExecutableDir, "Updater.exe");
-            p.WorkingDirectory = Path.Combine(Runtime.ExecutableDir, "updater/");
-            Console.WriteLine($"Updater: {p.FileName}");
-            p.Arguments = "-d";
-
-            Process process = new Process();
-            process.StartInfo = p;
-            Console.WriteLine("Downloading...");
-            process.Start();
-            process.WaitForExit();
-            if (process.ExitCode != 0)
-                throw new TimeoutException();
-            Console.WriteLine("Finished downloading");
-            string updateExe = Path.Combine(Runtime.ExecutableDir, "master\\Toolbox.exe"),
-                  currentExe = System.Reflection.Assembly.GetEntryAssembly().Location;
-            if (!Utils.CreateMD5Hash(currentExe).SequenceEqual(Utils.CreateMD5Hash(updateExe)))
-                CanUpdate = true;
-        }
-
-        static async Task GetCommits(GitHubClient client)
-        {
-            var options = new ApiOptions
-            {
-                PageSize = 20,
-                PageCount = 1
-            };
-
-            DateTimeOffset CurrentRelease;
-            bool IsValidTime = DateTimeOffset.TryParse(Runtime.CompileDate, out CurrentRelease);
-
-            foreach (GitHubCommit c in await client.Repository.Commit.GetAll("KillzXGaming", "Switch-Toolbox", options))
-            {
-                if (IsValidTime)
-                {
-                    if (CurrentRelease.DateTime < c.Commit.Author.Date.DateTime)
-                        CommitList.Add(c);
-                    else
-                        break;
-                }
-                else
-                {
-                    //Just add extra commits. This shouldn't happen unless the user actually edits the file
-                    CommitList.Add(c);
-                }
             }
         }
 
         static async Task GetReleases(GitHubClient client)
         {
             Releases = new List<Release>();
-            foreach (Release r in await client.Repository.Release.GetAll("KillzXGaming", "Switch-Toolbox"))
-                Releases.Add(r);
+            foreach (Release release in await client.Repository.Release.GetAll(RepositoryOwner, RepositoryName))
+                Releases.Add(release);
+        }
+
+        static string GetAppSetting(string key, string fallback)
+        {
+            string value = ConfigurationManager.AppSettings[key];
+            if (string.IsNullOrWhiteSpace(value))
+                return fallback;
+            return value.Trim();
+        }
+
+        static ReleaseAsset GetPreferredAsset(Release release)
+        {
+            if (release == null || release.Assets == null || release.Assets.Count == 0)
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(ReleaseAssetName))
+            {
+                var configured = release.Assets.FirstOrDefault(x =>
+                    x.Name.Equals(ReleaseAssetName, StringComparison.OrdinalIgnoreCase));
+                if (configured != null)
+                    return configured;
+            }
+
+            var zipAsset = release.Assets.FirstOrDefault(x =>
+                x.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+            if (zipAsset != null)
+                return zipAsset;
+
+            return release.Assets.First();
+        }
+
+        static void LoadPatchNotes(Release release)
+        {
+            PatchNotes.Clear();
+
+            string dateText = (release.PublishedAt ?? release.CreatedAt).LocalDateTime.ToString();
+
+            if (string.IsNullOrWhiteSpace(release.Body))
+            {
+                PatchNotes.Add(new UpdatePatchNote
+                {
+                    Summary = "No patch notes were provided for this release.",
+                    Details = "This release does not include notes in the GitHub release body.",
+                    Date = dateText
+                });
+                return;
+            }
+
+            string[] lines = release.Body.Replace("\r", "").Split('\n');
+            foreach (string rawLine in lines)
+            {
+                string line = CleanPatchNoteLine(rawLine);
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                PatchNotes.Add(new UpdatePatchNote
+                {
+                    Summary = line,
+                    Details = line,
+                    Date = dateText
+                });
+            }
+
+            if (PatchNotes.Count == 0)
+            {
+                PatchNotes.Add(new UpdatePatchNote
+                {
+                    Summary = "No patch notes were provided for this release.",
+                    Details = "This release body contains no readable patch-note lines.",
+                    Date = dateText
+                });
+            }
+        }
+
+        static string CleanPatchNoteLine(string line)
+        {
+            if (line == null)
+                return string.Empty;
+
+            line = line.Trim();
+            if (line.Length == 0)
+                return line;
+
+            if (line.StartsWith("- "))
+                line = line.Substring(2).Trim();
+            else if (line.StartsWith("* "))
+                line = line.Substring(2).Trim();
+            else if (line.StartsWith("• "))
+                line = line.Substring(2).Trim();
+            else if (line.StartsWith("## "))
+                line = line.Substring(3).Trim();
+
+            if (line.StartsWith("`") && line.EndsWith("`") && line.Length > 1)
+                line = line.Substring(1, line.Length - 2);
+
+            return line.Trim();
         }
     }
 }

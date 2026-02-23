@@ -27,6 +27,7 @@ namespace Bfres.Structs
             ContextMenuStrip = new STContextMenuStrip();
 
             ContextMenuStrip.Items.Add(new ToolStripMenuItem("Import Material", null, ImportAction, Keys.Control | Keys.I));
+            ContextMenuStrip.Items.Add(new ToolStripMenuItem("Batch Material Replace", null, BatchReplaceAction));
             ContextMenuStrip.Items.Add(new ToolStripSeparator());
             ContextMenuStrip.Items.Add(new ToolStripMenuItem("Export All Materials", null, ExportAllAction, Keys.Control | Keys.A));
             ContextMenuStrip.Items.Add(new ToolStripMenuItem("Replace (From Folder)",null, ReplaceBatchAction, Keys.Control | Keys.R));
@@ -72,6 +73,12 @@ namespace Bfres.Structs
             }
             LibraryGUI.UpdateViewport();
         }
+        private void BatchReplaceAction(object sender, EventArgs e)
+        {
+            FMDL model = (FMDL)Parent;
+
+            new BatchMaterialReplaceForm(model).ShowDialog();
+        }
 
         public void Import()
         {
@@ -96,8 +103,8 @@ namespace Bfres.Structs
             Checked = true;
             ImageKey = "material";
             SelectedImageKey = "material";
-        }
 
+        }
         public ToolStripItem[] GetContextMenuItems()
         {
             List<ToolStripItem> Items = new List<ToolStripItem>();

@@ -17,6 +17,7 @@ using GL_EditorFramework.Interfaces;
 using FirstPlugin.Forms;
 using FirstPlugin.NodeWrappers;
 using OpenTK;
+using FirstPlugin;
 
 namespace FirstPlugin
 {
@@ -88,10 +89,10 @@ namespace FirstPlugin
             STToolStripItem[] newFileExt = new STToolStripItem[2];
             STToolStripItem[] editExt = new STToolStripItem[1];
 
+
+
             public MenuExt()
             {
-             //   toolExt[0] = new STToolStripItem("Models");
-            //    toolExt[0].DropDownItems.Add(new STToolStripItem("Batch Export (BFRES)", Export));
 
                 editExt[0] = new STToolStripItem("Use Advanced Editor As Default", AdvancedEditor);
                 newFileExt[0] = new STToolStripItem("BFRES (Switch)", NewSwitchBfres);
@@ -803,8 +804,6 @@ namespace FirstPlugin
        
             BFRESRender = new BFRESRender();
             DrawableContainer.Name = FileName;
-
-            BFRESRender.ModelTransform = MarioCostumeEditor.SetTransform(FileName);
             BFRESRender.ResFileNode = this;
 
             MeshCodec = new MeshCodec();
@@ -875,6 +874,7 @@ namespace FirstPlugin
             DrawableContainer.Drawables.Clear();
 
             ObjectEditor.RemoveContainer(DrawableContainer);
+            DrawablesLoaded = false;
 
             if (resFile != null)
             {
@@ -1582,6 +1582,7 @@ namespace FirstPlugin
 
                         resFile.ExternalFiles.Add(new ExternalFile() { Data = mem.ToArray() });
                         resFile.ExternalFileDict.Add(((BNTX)node).FileName);
+
                     }
                 }
             }

@@ -99,7 +99,6 @@
             this.fileToolStripMenuItem,
             this.editToolStripMenuItem,
             this.toolsToolStripMenuItem,
-            this.experimentalToolStripMenuItem,
             this.windowsToolStripMenuItem,
             this.settingsToolStripMenuItem,
             this.consoleToolStripMenuItem,

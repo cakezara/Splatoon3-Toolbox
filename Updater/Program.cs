@@ -1,20 +1,25 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Configuration;
+using System.Globalization;
+using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Net;
+using System.Security.AccessControl;
 using System.Threading;
 using System.Threading.Tasks;
 using Octokit;
-using System.Net;
-using System.IO.Compression;
-using System.IO;
-using System.Globalization;
-using System.Security.AccessControl;
 
 namespace Updater
 {
     class Program
     {
         static Release[] releases;
+
+        static readonly string RepositoryOwner = GetAppSetting("UpdateRepositoryOwner", "KillzXGaming");
+        static readonly string RepositoryName = GetAppSetting("UpdateRepositoryName", "Switch-Toolbox");
+        static readonly string ReleaseAssetName = GetAppSetting("UpdateReleaseAssetName", "");
 
         static string execDirectory = "";
         static string folderDir = "";
@@ -33,19 +38,22 @@ namespace Updater
 
             string versionTxt = Path.Combine(execDirectory, "Version.txt");
             if (!File.Exists(versionTxt))
-                File.Create(versionTxt);
+            {
+                using (File.Create(versionTxt))
+                {
+                }
+            }
 
             string[] versionInfo = File.ReadLines(versionTxt).ToArray();
 
-            string ProgramVersion = "";
-            string CompileDate = "";
-
-            string CommitInfo = "";
+            string programVersion = "";
+            string compileDate = "";
+            string commitInfo = "";
             if (versionInfo.Length >= 3)
             {
-                ProgramVersion = versionInfo[0];
-                CompileDate = versionInfo[1];
-                CommitInfo = versionInfo[2];
+                programVersion = versionInfo[0];
+                compileDate = versionInfo[1];
+                commitInfo = versionInfo[2];
             }
 
             foreach (string arg in args)
@@ -54,7 +62,7 @@ namespace Updater
                 {
                     case "-d":
                     case "--download":
-                        Download(CompileDate);
+                        Download(compileDate);
                         break;
                     case "-i":
                     case "--install":
@@ -73,17 +81,25 @@ namespace Updater
             }
             Console.Read();
         }
+
         static void Boot()
         {
             Console.WriteLine("Booting...");
-
             Thread.Sleep(3000);
             System.Diagnostics.Process.Start(Path.Combine(folderDir, "Toolbox.exe"));
         }
+
         static void Install()
         {
             Console.WriteLine("Installing...");
-            foreach (string dir in Directory.GetDirectories("master/"))
+            string extractRoot = GetExtractRoot("master");
+            if (!Directory.Exists(extractRoot))
+            {
+                Console.WriteLine("No extracted update directory was found.");
+                return;
+            }
+
+            foreach (string dir in Directory.GetDirectories(extractRoot))
             {
                 SetAccessRule(folderDir);
                 SetAccessRule(dir);
@@ -91,21 +107,19 @@ namespace Updater
                 string dirName = new DirectoryInfo(dir).Name;
                 string destDir = Path.Combine(folderDir, dirName + @"\");
 
-                //Skip hash directory
                 if (dirName.Equals("Hashes", StringComparison.CurrentCultureIgnoreCase))
                     continue;
 
                 if (Directory.Exists(destDir))
-                {
                     Directory.Delete(destDir, true);
-                }
 
                 if (Directory.Exists(destDir))
                     Directory.Delete(destDir, true);
 
                 Directory.Move(dir, destDir);
             }
-            foreach (string file in Directory.GetFiles("master/"))
+
+            foreach (string file in Directory.GetFiles(extractRoot))
             {
                 if (file.Contains("Updater.exe") || file.Contains("Updater.exe.config")
                     || file.Contains("Updater.pdb") || file.Contains("Octokit.dll"))
@@ -122,11 +136,24 @@ namespace Updater
             }
         }
 
+        static string GetExtractRoot(string baseDirectory)
+        {
+            if (!Directory.Exists(baseDirectory))
+                return baseDirectory;
+
+            string[] childDirectories = Directory.GetDirectories(baseDirectory);
+            string[] childFiles = Directory.GetFiles(baseDirectory);
+            if (childDirectories.Length == 1 && childFiles.Length == 0)
+                return childDirectories[0];
+
+            return baseDirectory;
+        }
+
         static void SetAccessRule(string directory)
         {
             try
             {
-                System.Security.AccessControl.DirectorySecurity sec = System.IO.Directory.GetAccessControl(directory);
+                DirectorySecurity sec = Directory.GetAccessControl(directory);
                 FileSystemAccessRule accRule = new FileSystemAccessRule(Environment.UserDomainName + "\\" + Environment.UserName, FileSystemRights.FullControl, AccessControlType.Allow);
                 sec.AddAccessRule(accRule);
                 Directory.SetAccessControl(directory, sec);
@@ -137,20 +164,23 @@ namespace Updater
             }
         }
 
-
-        static void Download(string CompileDate)
+        static void Download(string compileDate)
         {
             foreach (Release latest in releases)
             {
+                ReleaseAsset asset = GetPreferredAsset(latest);
+                if (asset == null)
+                    continue;
+
                 Console.WriteLine("Checking Update");
                 if (!foundRelease)
                 {
-                    if (!latest.Assets[0].UpdatedAt.ToString().Equals(CompileDate))
+                    if (!asset.UpdatedAt.ToString().Equals(compileDate))
                     {
                         Console.WriteLine("Downloading release...");
-                        bool IsDownloaded = DownloadedProgram(latest);
+                        bool isDownloaded = DownloadedProgram(latest, asset);
 
-                        if (IsDownloaded)
+                        if (isDownloaded)
                             Console.WriteLine("Downloaded update successfully!");
                         else
                             Console.WriteLine("Failed to download update!");
@@ -159,15 +189,18 @@ namespace Updater
                 foundRelease = true;
             }
         }
-        static bool DownloadedProgram(Release release)
+
+        static bool DownloadedProgram(Release release, ReleaseAsset asset)
         {
-            return DownloadRelease("master",
-                release.Assets[0].BrowserDownloadUrl,
+            return DownloadRelease(
+                "master",
+                asset.BrowserDownloadUrl,
                 release.TagName,
-                release.Assets[0].UpdatedAt.ToString(),
+                asset.UpdatedAt.ToString(),
                 release.TargetCommitish);
         }
-        static bool DownloadRelease(string downloadName, string url, string ProgramVersion, string CompileDate, string CommitInfo)
+
+        static bool DownloadRelease(string downloadName, string url, string programVersion, string compileDate, string commitInfo)
         {
             try
             {
@@ -175,34 +208,66 @@ namespace Updater
                 {
                     webClient.DownloadFile(url, downloadName + ".zip");
                 }
+
                 if (Directory.Exists(downloadName + "/"))
                     Directory.Delete(downloadName + "/", true);
-                ZipFile.ExtractToDirectory(downloadName + ".zip", downloadName + "/");
 
-                //Zip not needed anymore
+                ZipFile.ExtractToDirectory(downloadName + ".zip", downloadName + "/");
                 File.Delete(downloadName + ".zip");
-                string versionTxt = Path.Combine(Path.GetFullPath(downloadName + "/"), "Version.txt");
+
+                string extractRoot = GetExtractRoot(downloadName);
+                string versionTxt = Path.Combine(Path.GetFullPath(extractRoot), "Version.txt");
 
                 using (StreamWriter writer = new StreamWriter(versionTxt))
                 {
-                    writer.WriteLine($"{ProgramVersion}");
-                    writer.WriteLine($"{CompileDate}");
-                    writer.WriteLine($"{CommitInfo}");
+                    writer.WriteLine($"{programVersion}");
+                    writer.WriteLine($"{compileDate}");
+                    writer.WriteLine($"{commitInfo}");
                 }
                 return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to download update! {ex.ToString()}");
+                Console.WriteLine($"Failed to download update! {ex}");
                 return false;
             }
         }
+
         static async Task GetReleases(GitHubClient client)
         {
-            List<Release> Releases = new List<Release>();
-            foreach (Release r in await client.Repository.Release.GetAll("KillzXGaming", "Switch-Toolbox"))
-                Releases.Add(r);
-            releases = Releases.ToArray();
+            List<Release> releaseList = new List<Release>();
+            foreach (Release release in await client.Repository.Release.GetAll(RepositoryOwner, RepositoryName))
+                releaseList.Add(release);
+            releases = releaseList.ToArray();
+        }
+
+        static ReleaseAsset GetPreferredAsset(Release release)
+        {
+            if (release == null || release.Assets == null || release.Assets.Count == 0)
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(ReleaseAssetName))
+            {
+                var configured = release.Assets.FirstOrDefault(x =>
+                    x.Name.Equals(ReleaseAssetName, StringComparison.OrdinalIgnoreCase));
+                if (configured != null)
+                    return configured;
+            }
+
+            var zipAsset = release.Assets.FirstOrDefault(x =>
+                x.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+            if (zipAsset != null)
+                return zipAsset;
+
+            return release.Assets.First();
+        }
+
+        static string GetAppSetting(string key, string fallback)
+        {
+            string value = ConfigurationManager.AppSettings[key];
+            if (string.IsNullOrWhiteSpace(value))
+                return fallback;
+            return value.Trim();
         }
     }
 }
