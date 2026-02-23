@@ -1,7 +1,7 @@
 # Splatoon3-Toolbox
 A fork of Switch Toolbox to revolve around Splatoon 3 model editing
 
-# Download
+### Download here:
 https://github.com/cakezara/Splatoon3-Toolbox/releases
 
 This tool adds many features + tools for quality of life and speed, specifically in importing custom/ported models.
