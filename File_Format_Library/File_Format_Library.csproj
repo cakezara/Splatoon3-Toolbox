@@ -1554,6 +1554,7 @@
     <Compile Include="FileFormats\Shader\BFSHA.cs" />
     <Compile Include="FileFormats\Shader\BNSH.cs" />
     <Compile Include="FileFormats\Byaml\BYAML.cs" />
+    <Compile Include="FileFormats\Splatoon3\TagProductRSTBL.cs" />
     <Compile Include="FileFormats\Turbo\Course_MapCamera_bin.cs" />
     <Compile Include="FileFormats\Custom\CsvModels.cs" />
     <Compile Include="FileFormats\Archives\GFPAK.cs" />

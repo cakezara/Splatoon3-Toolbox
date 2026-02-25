@@ -2070,6 +2070,7 @@ namespace FirstPlugin
             Formats.Add(typeof(TRPAK));
             Formats.Add(typeof(BNTX));
             Formats.Add(typeof(BEA));
+            Formats.Add(typeof(TagProductRSTBL));
             Formats.Add(typeof(BYAML));
             Formats.Add(typeof(XTX));
             Formats.Add(typeof(BXFNT));
