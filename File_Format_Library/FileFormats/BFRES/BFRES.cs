@@ -970,10 +970,20 @@ namespace FirstPlugin
             }
 
 
-            if (IsWiiU)
-                SaveWiiU(stream);
-            else
-                SaveSwitch(stream);
+            ImportMissingTextures = false;
+            SkipMissingTextures = false;
+            try
+            {
+                if (IsWiiU)
+                    SaveWiiU(stream);
+                else
+                    SaveSwitch(stream);
+            }
+            finally
+            {
+                ImportMissingTextures = false;
+                SkipMissingTextures = false;
+            }
 
             if (MeshCodec.TextureList.Count > 0)
                 MeshCodec.SaveTexToGo();
@@ -1945,9 +1955,92 @@ namespace FirstPlugin
             }
         }
 
+        enum MissingTexturePromptResult
+        {
+            Yes,
+            No,
+            NoToAll,
+        }
+
         static bool ImportMissingTextures = false;
+        static bool SkipMissingTextures = false;
+
+        private static MissingTexturePromptResult ShowMissingTexturePrompt(string message)
+        {
+            using (Form dialog = new Form())
+            {
+                dialog.Text = "Toolbox";
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                dialog.ShowInTaskbar = false;
+                dialog.ClientSize = new System.Drawing.Size(350, 132);
+
+                Label messageLabel = new Label();
+                messageLabel.Text = message;
+                messageLabel.Dock = DockStyle.Fill;
+                messageLabel.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+                messageLabel.Padding = new Padding(10, 4, 10, 4);
+                messageLabel.Font = new System.Drawing.Font(
+                    dialog.Font.FontFamily,
+                    dialog.Font.Size + 0.1f,
+                    dialog.Font.Style);
+                dialog.Controls.Add(messageLabel);
+
+                Panel buttonPanel = new Panel();
+                buttonPanel.Dock = DockStyle.Bottom;
+                buttonPanel.Height = 40;
+                dialog.Controls.Add(buttonPanel);
+
+                int buttonWidth = 84;
+                int buttonHeight = 26;
+                int buttonSpacing = 8;
+                int rightMargin = 12;
+                int buttonTop = 7;
+
+                Button yesButton = new Button();
+                yesButton.Text = "Yes";
+                yesButton.DialogResult = DialogResult.Yes;
+                yesButton.Size = new System.Drawing.Size(buttonWidth, buttonHeight);
+                buttonPanel.Controls.Add(yesButton);
+
+                Button noButton = new Button();
+                noButton.Text = "No";
+                noButton.DialogResult = DialogResult.No;
+                noButton.Size = new System.Drawing.Size(buttonWidth, buttonHeight);
+                buttonPanel.Controls.Add(noButton);
+
+                Button noToAllButton = new Button();
+                noToAllButton.Text = "No to All";
+                noToAllButton.DialogResult = DialogResult.Ignore;
+                noToAllButton.Size = new System.Drawing.Size(buttonWidth, buttonHeight);
+                buttonPanel.Controls.Add(noToAllButton);
+
+                noToAllButton.Location = new System.Drawing.Point(
+                    dialog.ClientSize.Width - rightMargin - buttonWidth, buttonTop);
+                noButton.Location = new System.Drawing.Point(
+                    noToAllButton.Left - buttonSpacing - buttonWidth, buttonTop);
+                yesButton.Location = new System.Drawing.Point(
+                    noButton.Left - buttonSpacing - buttonWidth, buttonTop);
+
+                dialog.AcceptButton = yesButton;
+                dialog.CancelButton = noButton;
+
+                DialogResult result = dialog.ShowDialog();
+                if (result == DialogResult.Yes)
+                    return MissingTexturePromptResult.Yes;
+                if (result == DialogResult.Ignore)
+                    return MissingTexturePromptResult.NoToAll;
+                return MissingTexturePromptResult.No;
+            }
+        }
+
         public static void CheckMissingTextures(FSHP shape)
         {
+            if (SkipMissingTextures)
+                return;
+
             // FSHP > Objects > FMDL > Models > BFRES
             BFRES root = (BFRES)shape.Parent.Parent.Parent.Parent;
 
@@ -1966,27 +2059,31 @@ namespace FirstPlugin
                             textureList.Add(tex.Name);
                     }
 
-                    foreach (var tex in textureList)
+                    foreach (var texture in textureList)
                     {
-                        if (!bntx.Textures.ContainsKey(tex))
+                        if (!bntx.Textures.ContainsKey(texture))
                         {
                             if (!ImportMissingTextures)
                             {
-                                string textureDetails = string.Join("\n",textureList);
-                                DialogResult result = MessageBox.Show($"Missing textures found! Would you like to use placeholders?\nTextures:\n{textureDetails}", "", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                                var result = ShowMissingTexturePrompt(
+                                    $"Missing texture found:\r\n{texture}\r\n\r\nWould you like to use a placeholder?");
 
-                                if (result == DialogResult.Yes)
+                                if (result == MissingTexturePromptResult.Yes)
                                 {
                                     ImportMissingTextures = true;
                                 }
-                                else
+                                else if (result == MissingTexturePromptResult.NoToAll)
+                                {
+                                    SkipMissingTextures = true;
                                     return;
+                                }
+                                else
+                                    continue;
                             }
 
                             if (ImportMissingTextures)
                             {
-                                foreach (var texture in textureList)
-                                    bntx.ImportPlaceholderTexture(texture);
+                                bntx.ImportPlaceholderTexture(texture);
                             }
                         }
                     }
@@ -2006,15 +2103,21 @@ namespace FirstPlugin
                         {
                             if (!ImportMissingTextures)
                             {
-                                DialogResult result = MessageBox.Show("Missing textures found! Would you like to use placeholders?", "", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                                var result = ShowMissingTexturePrompt(
+                                    $"Missing texture found:\r\n{tex.Name}\r\n\r\nWould you like to use a placeholder?");
 
-                                if (result == DialogResult.Yes)
+                                if (result == MissingTexturePromptResult.Yes)
                                 {
                                     ImportMissingTextures = true;
                                 }
+                                else if (result == MissingTexturePromptResult.NoToAll)
+                                {
+                                    SkipMissingTextures = true;
+                                    return;
+                                }
                                 else
                                 {
-                                    return;
+                                    continue;
                                 }
                             }
 
