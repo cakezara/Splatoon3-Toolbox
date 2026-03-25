@@ -417,6 +417,7 @@ namespace FirstPlugin
         private const int WM_SETREDRAW = 0x000B;
         private const int EM_GETSCROLLPOS = 0x04DD;
         private const int EM_SETSCROLLPOS = 0x04DE;
+        private const int InitialColoringTimeBudgetSeconds = 20;
         private static readonly Regex YamlAnchorListItemPattern =
             new Regex(@"^(\s*-\s+)&[^\s]+\s+(.+)$", RegexOptions.Multiline | RegexOptions.CultureInvariant);
 
@@ -436,8 +437,6 @@ namespace FirstPlugin
         private bool _isApplyingSyntaxColor;
         private bool _queueInitialColorOnHandle;
         private bool _queueInitialColorOnVisible;
-        private bool _hasAskedLoadColorPreference;
-        private bool _loadColorOnOpen;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct ScrollPoint
@@ -451,6 +450,13 @@ namespace FirstPlugin
             public int SelectionStart;
             public int SelectionLength;
             public ScrollPoint ScrollPoint;
+        }
+
+        private struct SyntaxColorRange
+        {
+            public int Start;
+            public int Length;
+            public int ColorIndex;
         }
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
@@ -905,31 +911,8 @@ namespace FirstPlugin
                 if (IsDisposed)
                     return;
 
-                EnsureLoadColorPreference();
-                if (_loadColorOnOpen)
-                    ApplyFullColoringPass();
+                ApplyFullColoringPass();
             }));
-        }
-
-        private void EnsureLoadColorPreference()
-        {
-            if (_hasAskedLoadColorPreference)
-                return;
-
-            const string message =
-                "Load syntax colors for this Tag file?\n" +
-                "Could result in longer loading";
-
-            DialogResult result = MessageBox.Show(
-                this,
-                message,
-                "Splatoon 3 Tag Editor",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question,
-                MessageBoxDefaultButton.Button2);
-
-            _loadColorOnOpen = (result == DialogResult.Yes);
-            _hasAskedLoadColorPreference = true;
         }
 
         private void ApplyFullColoringPass()
@@ -937,115 +920,224 @@ namespace FirstPlugin
             if (IsDisposed || !Visible || _isApplyingSyntaxColor)
                 return;
 
-            ColorEntireDocument(_entriesTextBox, colorTitles: true);
-            ColorEntireDocument(_tagsTextBox, colorTitles: false);
+            DateTime deadlineUtc = DateTime.UtcNow.AddSeconds(InitialColoringTimeBudgetSeconds);
+            bool coloredEntries = ColorEntireDocument(_entriesTextBox, colorTitles: true, deadlineUtc);
+            bool coloredTags = ColorEntireDocument(_tagsTextBox, colorTitles: false, deadlineUtc);
+
+            if ((!coloredEntries || !coloredTags) &&
+                (_statusLabel.Text?.IndexOf("Syntax coloring timed out", StringComparison.Ordinal) ?? -1) < 0)
+                _statusLabel.Text += " | Syntax coloring timed out";
         }
 
-        private void ColorEntireDocument(RichTextBox box, bool colorTitles)
+        private bool ColorEntireDocument(RichTextBox box, bool colorTitles, DateTime deadlineUtc)
         {
             if (box == null || box.IsDisposed || box.TextLength == 0)
-                return;
+                return true;
 
-            int lineCount = box.Lines.Length;
-            if (lineCount <= 0)
-                return;
+            if (DateTime.UtcNow >= deadlineUtc)
+                return false;
 
-            ApplyLineColorsRange(box, colorTitles, 0, lineCount - 1);
+            return ApplyRtfColoring(box, colorTitles, deadlineUtc);
         }
 
-        private void ApplyLineColorsRange(RichTextBox box, bool colorTitles, int startLine, int endLine)
+        private bool ApplyRtfColoring(RichTextBox box, bool colorTitles, DateTime deadlineUtc)
         {
             if (_isApplyingSyntaxColor)
-                return;
-            if (box == null || box.IsDisposed || box.TextLength == 0 || startLine > endLine)
-                return;
+                return false;
+            if (box == null || box.IsDisposed || box.TextLength == 0)
+                return true;
 
             _isApplyingSyntaxColor = true;
             TextViewState viewState = CaptureViewState(box);
+            bool previousReloading = _isReloading;
 
             try
             {
-                SuspendRedraw(box);
                 string text = box.Text ?? string.Empty;
-                var titleRanges = new List<Tuple<int, int>>();
-                var attributeRanges = new List<Tuple<int, int>>();
-                int textLength = text.Length;
-                int lineCount = box.Lines.Length;
-                startLine = Math.Max(0, Math.Min(startLine, lineCount - 1));
-                endLine = Math.Max(0, Math.Min(endLine, lineCount - 1));
-                if (startLine > endLine)
-                    return;
+                List<SyntaxColorRange> ranges = BuildSyntaxRanges(text, colorTitles, deadlineUtc);
+                if (ranges == null)
+                    return false;
 
-                int rangeStart = box.GetFirstCharIndexFromLine(startLine);
-                int rangeEnd;
-                if (endLine + 1 < lineCount)
-                    rangeEnd = box.GetFirstCharIndexFromLine(endLine + 1);
-                else
-                    rangeEnd = textLength;
+                if (DateTime.UtcNow >= deadlineUtc)
+                    return false;
 
-                if (rangeStart < 0 || rangeEnd < rangeStart)
-                    return;
+                Color defaultColor = box.ForeColor;
+                string rtf = BuildColorizedRtf(text, ranges, defaultColor, TitleColor, AttributeColor);
 
-                int pos = rangeStart;
-                while (pos < rangeEnd)
-                {
-                    int lineStart = pos;
-                    while (pos < rangeEnd && text[pos] != '\n')
-                        pos++;
+                if (DateTime.UtcNow >= deadlineUtc)
+                    return false;
 
-                    int lineEnd = pos;
-                    if (lineEnd > lineStart && text[lineEnd - 1] == '\r')
-                        lineEnd--;
-
-                    int contentStart = lineStart;
-                    while (contentStart < lineEnd && char.IsWhiteSpace(text[contentStart]))
-                        contentStart++;
-
-                    if (contentStart < lineEnd)
-                    {
-                        if (contentStart + 1 < lineEnd &&
-                            text[contentStart] == '-' &&
-                            text[contentStart + 1] == ' ')
-                        {
-                            attributeRanges.Add(Tuple.Create(contentStart, lineEnd - contentStart));
-                        }
-                        else if (colorTitles)
-                        {
-                            int colonIndex = -1;
-                            for (int i = contentStart; i < lineEnd; i++)
-                            {
-                                if (text[i] == ':')
-                                {
-                                    colonIndex = i;
-                                    break;
-                                }
-                            }
-                            if (colonIndex >= 0)
-                                titleRanges.Add(Tuple.Create(contentStart, colonIndex - contentStart + 1));
-                        }
-                    }
-
-                    if (pos < rangeEnd && text[pos] == '\n')
-                        pos++;
-                }
-
-                foreach (var range in titleRanges)
-                {
-                    box.Select(range.Item1, range.Item2);
-                    box.SelectionColor = TitleColor;
-                }
-
-                foreach (var range in attributeRanges)
-                {
-                    box.Select(range.Item1, range.Item2);
-                    box.SelectionColor = AttributeColor;
-                }
+                SuspendRedraw(box);
+                _isReloading = true;
+                box.Rtf = rtf;
+                return true;
             }
             finally
             {
+                _isReloading = previousReloading;
                 ResumeRedraw(box);
                 RestoreViewState(box, viewState);
                 _isApplyingSyntaxColor = false;
+            }
+        }
+
+        private static List<SyntaxColorRange> BuildSyntaxRanges(string text, bool colorTitles, DateTime deadlineUtc)
+        {
+            var ranges = new List<SyntaxColorRange>();
+            if (string.IsNullOrEmpty(text))
+                return ranges;
+
+            int textLength = text.Length;
+            int pos = 0;
+            while (pos < textLength)
+            {
+                if (DateTime.UtcNow >= deadlineUtc)
+                    return null;
+
+                int lineStart = pos;
+                while (pos < textLength && text[pos] != '\n')
+                    pos++;
+
+                int lineEnd = pos;
+                if (lineEnd > lineStart && text[lineEnd - 1] == '\r')
+                    lineEnd--;
+
+                int contentStart = lineStart;
+                while (contentStart < lineEnd && char.IsWhiteSpace(text[contentStart]))
+                    contentStart++;
+
+                if (contentStart < lineEnd)
+                {
+                    if (contentStart + 1 < lineEnd &&
+                        text[contentStart] == '-' &&
+                        text[contentStart + 1] == ' ')
+                    {
+                        ranges.Add(new SyntaxColorRange()
+                        {
+                            Start = contentStart,
+                            Length = lineEnd - contentStart,
+                            ColorIndex = 3,
+                        });
+                    }
+                    else if (colorTitles)
+                    {
+                        int colonIndex = -1;
+                        for (int i = contentStart; i < lineEnd; i++)
+                        {
+                            if (text[i] == ':')
+                            {
+                                colonIndex = i;
+                                break;
+                            }
+                        }
+
+                        if (colonIndex >= 0)
+                        {
+                            ranges.Add(new SyntaxColorRange()
+                            {
+                                Start = contentStart,
+                                Length = colonIndex - contentStart + 1,
+                                ColorIndex = 2,
+                            });
+                        }
+                    }
+                }
+
+                if (pos < textLength && text[pos] == '\n')
+                    pos++;
+            }
+
+            return ranges;
+        }
+
+        private static string BuildColorizedRtf(
+            string text,
+            List<SyntaxColorRange> ranges,
+            Color defaultColor,
+            Color titleColor,
+            Color attributeColor)
+        {
+            string header = BuildRtfHeader(defaultColor, titleColor, attributeColor);
+            var sb = new StringBuilder(header.Length + text.Length + Math.Max(128, ranges.Count * 16));
+            sb.Append(header);
+            sb.Append(@"\cf1 ");
+
+            int position = 0;
+            foreach (var range in ranges)
+            {
+                if (range.Length <= 0 || range.Start < 0 || range.Start >= text.Length)
+                    continue;
+
+                int start = range.Start;
+                int end = Math.Min(text.Length, range.Start + range.Length);
+                if (end <= start)
+                    continue;
+
+                if (start > position)
+                    AppendEscapedRtfText(sb, text, position, start - position);
+
+                sb.Append(@"\cf").Append(range.ColorIndex).Append(' ');
+                AppendEscapedRtfText(sb, text, start, end - start);
+                sb.Append(@"\cf1 ");
+                position = end;
+            }
+
+            if (position < text.Length)
+                AppendEscapedRtfText(sb, text, position, text.Length - position);
+
+            sb.Append('}');
+            return sb.ToString();
+        }
+
+        private static string BuildRtfHeader(Color defaultColor, Color titleColor, Color attributeColor)
+        {
+            return "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fnil Consolas;}}" +
+                "{\\colortbl ;" +
+                BuildRtfColor(defaultColor) +
+                BuildRtfColor(titleColor) +
+                BuildRtfColor(attributeColor) +
+                "}" +
+                "\\viewkind4\\uc1\\pard\\f0\\fs18 ";
+        }
+
+        private static string BuildRtfColor(Color color)
+        {
+            return $"\\red{color.R}\\green{color.G}\\blue{color.B};";
+        }
+
+        private static void AppendEscapedRtfText(StringBuilder sb, string text, int start, int length)
+        {
+            int end = start + length;
+            for (int i = start; i < end; i++)
+            {
+                char c = text[i];
+                if (c == '\\')
+                {
+                    sb.Append(@"\\");
+                }
+                else if (c == '{')
+                {
+                    sb.Append(@"\{");
+                }
+                else if (c == '}')
+                {
+                    sb.Append(@"\}");
+                }
+                else if (c == '\r')
+                {
+                }
+                else if (c == '\n')
+                {
+                    sb.Append(@"\par ");
+                }
+                else if (c > 0x7F)
+                {
+                    sb.Append("\\u").Append((short)c).Append('?');
+                }
+                else
+                {
+                    sb.Append(c);
+                }
             }
         }
 
