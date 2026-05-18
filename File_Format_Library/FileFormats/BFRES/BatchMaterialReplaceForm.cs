@@ -234,33 +234,98 @@ namespace FirstPlugin
 
         private string DecodeUserData(object userData)
         {
-            if (userData == null)
+            if (!TryDecodeUserDataFlag(userData, out bool isPaintable))
                 return "";
+
+            return isPaintable ? "Paintable" : "Not Paintable";
+        }
+
+        private bool TryDecodeUserDataFlag(object userData, out bool isPaintable)
+        {
+            isPaintable = false;
+            if (userData == null)
+                return false;
 
             var field = userData.GetType()
                 .GetFields(BindingFlags.NonPublic | BindingFlags.Instance)
                 .FirstOrDefault();
 
             if (field == null)
-                return "";
+                return false;
 
             object raw = field.GetValue(userData);
 
             if (raw is int[] i && i.Length > 0)
-                return i[0] == 1 ? "Paintable" : "Not Paintable";
+            {
+                isPaintable = i[0] == 1;
+                return true;
+            }
 
             if (raw is uint[] u && u.Length > 0)
-                return u[0] == 1 ? "Paintable" : "Not Paintable";
+            {
+                isPaintable = u[0] == 1;
+                return true;
+            }
 
             if (raw is byte[] b && b.Length > 0)
             {
                 if (b.Length >= 4)
-                    return BitConverter.ToInt32(b, 0) == 1 ? "Paintable" : "Not Paintable";
+                {
+                    isPaintable = BitConverter.ToInt32(b, 0) == 1;
+                    return true;
+                }
 
-                return b[0] == 1 ? "Paintable" : "Not Paintable";
+                isPaintable = b[0] == 1;
+                return true;
             }
 
-            return "";
+            return false;
+        }
+
+        private bool TryGetSplatoon2PaintableValue(FMAT mat, out bool isPaintable)
+        {
+            isPaintable = false;
+            bool found = false;
+            bool anyPaintable = false;
+            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "GroundPaint", "WallPaint", "ObjPaint" };
+
+            if (mat.Material != null && mat.Material.UserDatas != null)
+            {
+                foreach (var data in mat.Material.UserDatas)
+                {
+                    if (!keys.Contains(data.Name))
+                        continue;
+
+                    if (!TryDecodeUserDataFlag(data, out bool value))
+                        continue;
+
+                    found = true;
+                    if (value)
+                        anyPaintable = true;
+                }
+            }
+
+            if (mat.MaterialU != null && mat.MaterialU.UserData != null)
+            {
+                foreach (var pair in mat.MaterialU.UserData)
+                {
+                    if (!keys.Contains(pair.Key))
+                        continue;
+
+                    if (!TryDecodeUserDataFlag(pair.Value, out bool value))
+                        continue;
+
+                    found = true;
+                    if (value)
+                        anyPaintable = true;
+                }
+            }
+
+            if (!found)
+                return false;
+
+            isPaintable = anyPaintable;
+            return true;
         }
 
         private string GetPaintableValue(FMAT mat)
@@ -274,6 +339,9 @@ namespace FirstPlugin
                 foreach (var pair in mat.MaterialU.UserData)
                     if (pair.Key.Equals("Paintable", StringComparison.OrdinalIgnoreCase))
                         return DecodeUserData(pair.Value);
+
+            if (TryGetSplatoon2PaintableValue(mat, out bool splatoon2Paintable))
+                return splatoon2Paintable ? "Paintable" : "Not Paintable";
 
             return "";
         }
