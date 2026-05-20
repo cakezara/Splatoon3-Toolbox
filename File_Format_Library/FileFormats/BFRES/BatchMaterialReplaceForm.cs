@@ -591,17 +591,25 @@ namespace FirstPlugin
         private void ApplyReplacements(object sender, EventArgs e)
         {
             int replacedCount = 0;
-
-            foreach (var entry in ReplacementMap)
+            bool swapShaderParams = PluginRuntime.MaterialReplace.SwapShaderParams;
+            PluginRuntime.MaterialReplace.SwapShaderParams = false;
+            try
             {
-                if (!Model.materials.ContainsKey(entry.Key))
-                    continue;
+                foreach (var entry in ReplacementMap)
+                {
+                    if (!Model.materials.ContainsKey(entry.Key))
+                        continue;
 
-                if (!File.Exists(entry.Value))
-                    continue;
+                    if (!File.Exists(entry.Value))
+                        continue;
 
-                Model.materials[entry.Key].Replace(entry.Value, false);
-                replacedCount++;
+                    Model.materials[entry.Key].Replace(entry.Value, false, true);
+                    replacedCount++;
+                }
+            }
+            finally
+            {
+                PluginRuntime.MaterialReplace.SwapShaderParams = swapShaderParams;
             }
 
             LibraryGUI.UpdateViewport();

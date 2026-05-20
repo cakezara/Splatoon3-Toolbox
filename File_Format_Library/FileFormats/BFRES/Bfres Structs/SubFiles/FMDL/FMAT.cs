@@ -379,12 +379,15 @@ namespace Bfres.Structs
         }
         public void Replace(string path, bool UseReplaceDialog)
         {
+            Replace(path, UseReplaceDialog, false);
+        }
+        public void Replace(string path, bool UseReplaceDialog, bool UseSwapSettings)
+        {
             if (GetResFileU() != null)
             {
-                if (UseReplaceDialog)
+                if (UseReplaceDialog || UseSwapSettings)
                 {
-                    MaterialReplaceDialog dialog = new MaterialReplaceDialog();
-                    if (dialog.ShowDialog() == DialogResult.OK)
+                    if (!UseReplaceDialog || new MaterialReplaceDialog().ShowDialog() == DialogResult.OK)
                     {
                         var mat = new ResU.Material();
                         mat.Import(path, GetResFileU());
@@ -418,10 +421,9 @@ namespace Bfres.Structs
             }
             else
             {
-                if (UseReplaceDialog)
+                if (UseReplaceDialog || UseSwapSettings)
                 {
-                    MaterialReplaceDialog dialog = new MaterialReplaceDialog();
-                    if (dialog.ShowDialog() == DialogResult.OK)
+                    if (!UseReplaceDialog || new MaterialReplaceDialog().ShowDialog() == DialogResult.OK)
                     {
                         var mat = new Material();
                         mat.Import(path);
