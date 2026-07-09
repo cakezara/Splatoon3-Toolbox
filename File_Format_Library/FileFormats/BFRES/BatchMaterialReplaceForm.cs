@@ -23,7 +23,7 @@ namespace FirstPlugin
         private Dictionary<string, string> ReplacementMap = new Dictionary<string, string>();
         private UserControl contentControl;
         private FlowLayoutPanel optionsPanel;
-        private readonly string[] SignatureTokens = new string[] { "Alb", "Nrm", "Rgh", "Opa", "Mtl", "AO" };
+        private readonly string[] SignatureTokens = new string[] { "Alb", "Nrm", "Rgh", "Opa", "Mtl", "AO", "Emm", "Col" };
 
         public BatchMaterialReplaceForm(FMDL model)
             : base(false, CreateContentControl(out UserControl control))
@@ -226,6 +226,12 @@ namespace FirstPlugin
             if (textures.Any(t => t.Contains("_ao")))
                 types.Add("AO");
 
+            if (HasEmissionSampler(mat))
+                types.Add("Emm");
+
+            if (textures.Any(t => ContainsIgnoreCase(t, "_Col")))
+                types.Add("Col");
+
             if (types.Count == 0)
                 types.Add("No known Materials");
 
@@ -369,12 +375,26 @@ namespace FirstPlugin
             return value?.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        private bool HasEmissionSampler(FMAT mat)
+        {
+            return mat.shaderassign?.samplers?.Keys.Any(sampler =>
+                       string.Equals(sampler, "_e0", StringComparison.OrdinalIgnoreCase)) == true ||
+                   mat.TextureMaps.OfType<MatTexture>().Any(map =>
+                string.Equals(map.SamplerName, "_e0", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(map.FragShaderSampler, "_e0", StringComparison.OrdinalIgnoreCase));
+        }
+
         private bool HasSignatureTokens(FMAT mat, List<string> tokens)
         {
             var textures = GetTextureReferenceNames(mat);
             foreach (var token in tokens)
             {
-                if (token == "AO")
+                if (token == "Emm")
+                {
+                    if (!HasEmissionSampler(mat))
+                        return false;
+                }
+                else if (token == "AO")
                 {
                     if (!textures.Any(t => ContainsIgnoreCase(t, "_ao")))
                         return false;
@@ -395,7 +415,12 @@ namespace FirstPlugin
 
             foreach (var token in SignatureTokens)
             {
-                if (token == "AO")
+                if (token == "Emm")
+                {
+                    if (HasEmissionSampler(mat))
+                        present.Add(token);
+                }
+                else if (token == "AO")
                 {
                     if (textures.Any(t => ContainsIgnoreCase(t, "_ao")))
                         present.Add(token);
@@ -591,25 +616,17 @@ namespace FirstPlugin
         private void ApplyReplacements(object sender, EventArgs e)
         {
             int replacedCount = 0;
-            bool swapShaderParams = PluginRuntime.MaterialReplace.SwapShaderParams;
-            PluginRuntime.MaterialReplace.SwapShaderParams = false;
-            try
+            foreach (var entry in ReplacementMap)
             {
-                foreach (var entry in ReplacementMap)
-                {
-                    if (!Model.materials.ContainsKey(entry.Key))
-                        continue;
+                if (!Model.materials.ContainsKey(entry.Key))
+                    continue;
 
-                    if (!File.Exists(entry.Value))
-                        continue;
+                if (!File.Exists(entry.Value))
+                    continue;
 
-                    Model.materials[entry.Key].Replace(entry.Value, false, true);
-                    replacedCount++;
-                }
-            }
-            finally
-            {
-                PluginRuntime.MaterialReplace.SwapShaderParams = swapShaderParams;
+                FMAT material = Model.materials[entry.Key];
+                material.Replace(entry.Value, false);
+                replacedCount++;
             }
 
             LibraryGUI.UpdateViewport();

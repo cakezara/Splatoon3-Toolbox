@@ -379,9 +379,13 @@ namespace Bfres.Structs
         }
         public void Replace(string path, bool UseReplaceDialog)
         {
-            Replace(path, UseReplaceDialog, false);
+            Replace(path, UseReplaceDialog, false, true);
         }
         public void Replace(string path, bool UseReplaceDialog, bool UseSwapSettings)
+        {
+            Replace(path, UseReplaceDialog, UseSwapSettings, true);
+        }
+        internal void Replace(string path, bool UseReplaceDialog, bool UseSwapSettings, bool updateEditor)
         {
             if (GetResFileU() != null)
             {
@@ -465,8 +469,11 @@ namespace Bfres.Structs
                     BfresSwitch.ReadMaterial(this, Material);
                 }
             }
-            UpdateEditor();
-            UpdateTextureMaps();
+            if (updateEditor)
+            {
+                UpdateEditor();
+                UpdateTextureMaps();
+            }
             UpdateRenderPass();
         }
 

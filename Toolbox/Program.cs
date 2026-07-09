@@ -62,16 +62,33 @@ namespace Toolbox
 
             MainForm.LoadConfig();
 
-            if (Toolbox.Library.Runtime.UseSingleInstance)
+            Switch_Toolbox_Library.DiscordPresence discordPresence = new Switch_Toolbox_Library.DiscordPresence();
+            try
             {
-                SingleInstanceController controller = new SingleInstanceController();
-                controller.Run(args);
+                discordPresence.Initialize();
             }
-            else
+            catch (Exception ex)
             {
-                MainForm form = new MainForm();
-                form.OpenedFiles = Files;
-                Application.Run(form);
+                Console.Error.WriteLine(ex);
+            }
+
+            try
+            {
+                if (Toolbox.Library.Runtime.UseSingleInstance)
+                {
+                    SingleInstanceController controller = new SingleInstanceController();
+                    controller.Run(args);
+                }
+                else
+                {
+                    MainForm form = new MainForm();
+                    form.OpenedFiles = Files;
+                    Application.Run(form);
+                }
+            }
+            finally
+            {
+                discordPresence.Dispose();
             }
         }
 

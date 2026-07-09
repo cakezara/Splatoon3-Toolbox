@@ -1165,6 +1165,7 @@ namespace Bfres.Structs
                                 //Rebuild skeleton based on imported hierarchy order
                                 foreach (STBone importedBone in ImportedSkeleton.bones)
                                 {
+                                    Vector3 importedBonePosition = settings.ScaleDownByPointOne ? importedBone.Position * 0.1f : importedBone.Position;
                                     BfresBone targetBone = null;
                                     if (ExistingBones.ContainsKey(importedBone.Text))
                                     {
@@ -1173,8 +1174,8 @@ namespace Bfres.Structs
                                         //Smart Merge: Check tolerance to preserve original precision for boundary bones
                                         const float TOLERANCE = 0.001f;
                                         
-                                        if ((targetBone.Position - importedBone.Position).Length > TOLERANCE)
-                                            targetBone.Position = importedBone.Position;
+                                        if ((targetBone.Position - importedBonePosition).Length > TOLERANCE)
+                                            targetBone.Position = importedBonePosition;
                                         
                                         if ((targetBone.Scale - importedBone.Scale).Length > TOLERANCE)
                                             targetBone.Scale = importedBone.Scale;
@@ -1197,6 +1198,7 @@ namespace Bfres.Structs
                                         //New bone found in import
                                         targetBone = new BfresBone(Skeleton);
                                         targetBone.CloneBaseInstance(importedBone);
+                                        targetBone.Position = importedBonePosition;
                                         targetBone.Text = importedBone.Text;
                                         if (targetBone.Bone == null) targetBone.Bone = new Bone();
                                         

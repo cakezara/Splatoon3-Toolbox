@@ -433,6 +433,24 @@ namespace Bfres.Structs
             Cursor.Current = Cursors.Default;
         }
 
+        public void RebuildSingleMesh(FMDL model)
+        {
+            DisplayLODIndex = 0;
+
+            if (lodMeshes.Count == 0)
+                return;
+
+            LOD_Mesh mesh = lodMeshes[0];
+            lodMeshes.Clear();
+            lodMeshes.Add(mesh);
+            mesh.GenerateSubMesh();
+
+            CreateNewBoundingBoxes(model);
+            SaveShape(GetResFileU() != null);
+            UpdateVertexData();
+            GenerateBoundingNodes();
+        }
+
         private void GenerateBoundingNodes()
         {
             if (ShapeU != null)
@@ -673,6 +691,10 @@ namespace Bfres.Structs
             if (settings.Rotate90DegreesNegativeY)
             {
                 TransformPosition(Vector3.Zero, new Vector3(-90, 0, 0), new Vector3(1));
+            }
+            if (settings.ScaleDownByPointOne)
+            {
+                TransformPosition(Vector3.Zero, Vector3.Zero, new Vector3(0.1f));
             }
             if (settings.EnableTangents)
             {

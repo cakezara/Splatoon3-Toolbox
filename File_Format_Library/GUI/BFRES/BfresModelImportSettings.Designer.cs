@@ -82,6 +82,7 @@
             this.chkBoxRecalcNormals = new Toolbox.Library.Forms.STCheckBox();
             this.button1 = new System.Windows.Forms.Button();
             this.chkBoxTransformMatrix = new Toolbox.Library.Forms.STCheckBox();
+            this.chkScaleDownByPointOne = new Toolbox.Library.Forms.STCheckBox();
             this.chkBoxRot90Y = new Toolbox.Library.Forms.STCheckBox();
             this.pictureBox1 = new System.Windows.Forms.PictureBox();
             this.checkBox9 = new Toolbox.Library.Forms.STCheckBox();
@@ -483,6 +484,7 @@
             this.panel8.Controls.Add(this.chkBoxRecalcNormals);
             this.panel8.Controls.Add(this.button1);
             this.panel8.Controls.Add(this.chkBoxTransformMatrix);
+            this.panel8.Controls.Add(this.chkScaleDownByPointOne);
             this.panel8.Controls.Add(this.chkBoxRot90Y);
             this.panel8.Controls.Add(this.pictureBox1);
             this.panel8.Controls.Add(this.checkBox9);
@@ -733,6 +735,13 @@
             this.chkBoxTransformMatrix.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
             this.chkBoxTransformMatrix.UseVisualStyleBackColor = true;
             this.chkBoxTransformMatrix.CheckedChanged += new System.EventHandler(this.chkBoxSettings_CheckedChanged);
+            this.chkScaleDownByPointOne.AutoSize = true;
+            this.chkScaleDownByPointOne.Location = new System.Drawing.Point(3, 207);
+            this.chkScaleDownByPointOne.Name = "chkScaleDownByPointOne";
+            this.chkScaleDownByPointOne.Size = new System.Drawing.Size(145, 17);
+            this.chkScaleDownByPointOne.TabIndex = 40;
+            this.chkScaleDownByPointOne.Text = "Scale model down by 0.1";
+            this.chkScaleDownByPointOne.UseVisualStyleBackColor = true;
             // 
             // chkBoxRot90Y
             // 
@@ -1065,6 +1074,7 @@
         private Toolbox.Library.Forms.STCheckBox chkBoxImportBones;
         private Toolbox.Library.Forms.STPanel panel8;
         private Toolbox.Library.Forms.STCheckBox chkBoxTransformMatrix;
+        private Toolbox.Library.Forms.STCheckBox chkScaleDownByPointOne;
         private Toolbox.Library.Forms.STCheckBox chkBoxRot90Y;
         private System.Windows.Forms.PictureBox pictureBox1;
         private Toolbox.Library.Forms.STCheckBox checkBox9;

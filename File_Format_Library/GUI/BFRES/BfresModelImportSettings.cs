@@ -80,6 +80,7 @@ namespace FirstPlugin
 
         public bool CreateDummyLODs => chkCreateDummyLODs.Checked;
         public int DummyLODCount => (int)lodCountUD.Value;
+        public bool ScaleDownByPointOne => chkScaleDownByPointOne.Checked;
 
         public bool UseOriginalAttributes => chkOriginalAttributesFormats.Checked;
         public bool UseOriginalAttributeFormats => chkOriginalAttributesFormats.Checked;

@@ -134,6 +134,8 @@ namespace Toolbox
                 version.SaveVersionInfo();
             }
 
+            UpdateDiscordPresence(GetActiveIFileFormat());
+
             ThreadStart t = new ThreadStart(UpdateProgram.CheckLatest);
             Thread thread = new Thread(t);
             thread.Start();
@@ -916,6 +918,7 @@ namespace Toolbox
         private void SetFormatSettings(IFileFormat format)
         {
             ResetMenus();
+            UpdateDiscordPresence(format);
             if (format == null)
                 return;
 
@@ -1157,6 +1160,7 @@ namespace Toolbox
         bool IsChanged = false;
         private void MainForm_MdiChildActivate(object sender, EventArgs e)
         {
+            UpdateDiscordPresence(GetActiveIFileFormat());
             if (this.ActiveMdiChild == null)
             {
                 tabForms.Visible = false;
@@ -1255,6 +1259,18 @@ namespace Toolbox
                                     FormClosedEventArgs e)
         {
             ((sender as Form).Tag as TabPage).Dispose();
+            if (!IsDisposed && IsHandleCreated)
+                BeginInvoke(new Action(() => UpdateDiscordPresence(GetActiveIFileFormat())));
+        }
+
+        private void UpdateDiscordPresence(IFileFormat format)
+        {
+            bool developmentBuild = string.IsNullOrWhiteSpace(Runtime.ProgramVersion) ||
+                Runtime.ProgramVersion.Equals("Development", StringComparison.OrdinalIgnoreCase);
+            string fileName = format?.FileName;
+            if (!string.IsNullOrWhiteSpace(fileName))
+                fileName = Path.GetFileName(fileName);
+            Switch_Toolbox_Library.DiscordPresence.Current?.SetActivity(fileName, developmentBuild);
         }
 
         private void tabForms_SelectedIndexChanged(object sender, EventArgs e)

@@ -400,7 +400,10 @@ namespace Bfres.Structs
             }
 
             if (AddTreeNode)
+            {
                 AddNode(fmdl, "NewModel");
+                RegisterModel(fmdl);
+            }
 
             return fmdl;
         }
@@ -456,10 +459,11 @@ namespace Bfres.Structs
                 {
                     case BRESGroupType.Models:
                         FMDL fmdl = NewModel(false);
-                        fmdl.Text = ResourceName;
+                        fmdl.Text = SearchDuplicateName(ResourceName);
                         fmdl.Replace(FileName, resFileNX, resFileU);
-                        fmdl.UpdateVertexData();
                         AddNode(fmdl);
+                        RegisterModel(fmdl);
+                        fmdl.UpdateVertexData();
                         break;
                     case BRESGroupType.SkeletalAnim:
                         FSKA fska = new FSKA();
@@ -619,8 +623,42 @@ namespace Bfres.Structs
 
         public void RemoveChild(STGenericWrapper node)
         {
+            UnregisterModel(node);
             Nodes.Remove(node);
             ResourceNodes.Remove(node.Text);
+        }
+
+        private void RegisterModel(FMDL model)
+        {
+            if (Type != BRESGroupType.Models || Parent == null)
+                return;
+
+            BFRES bfres = Parent as BFRES;
+            if (bfres == null)
+                return;
+
+            if (bfres.BFRESRender != null && !bfres.BFRESRender.models.Contains(model))
+                bfres.BFRESRender.models.Add(model);
+
+            if (model.Skeleton != null && !bfres.DrawableContainer.Drawables.Contains(model.Skeleton))
+                bfres.DrawableContainer.Drawables.Add(model.Skeleton);
+        }
+
+        private void UnregisterModel(STGenericWrapper node)
+        {
+            if (Type != BRESGroupType.Models || Parent == null || !(node is FMDL))
+                return;
+
+            BFRES bfres = Parent as BFRES;
+            if (bfres == null)
+                return;
+
+            FMDL model = (FMDL)node;
+            if (bfres.BFRESRender != null)
+                bfres.BFRESRender.models.Remove(model);
+
+            if (model.Skeleton != null)
+                bfres.DrawableContainer.Drawables.Remove(model.Skeleton);
         }
 
 

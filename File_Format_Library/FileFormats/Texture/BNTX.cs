@@ -863,7 +863,8 @@ namespace FirstPlugin
             {
                 case ".bftex":
                     tex = new Texture();
-                    tex.Import(name);
+                    using (MemoryStream stream = new MemoryStream(File.ReadAllBytes(name)))
+                        tex.Import(stream, true);
                     texData = new TextureData(tex, BinaryTexFile);
                     break;
                 case ".dds":
@@ -1570,9 +1571,7 @@ namespace FirstPlugin
             switch (ext)
             {
                 case ".bftex":
-                    Texture.Import(FileName);
-                    Texture.Name = Text;
-                    LoadOpenGLTexture();
+                    ReplaceBftex(FileName, true);
                     break;
                 case ".dds":
                     setting.LoadDDS(FileName, null, this);
@@ -1614,6 +1613,17 @@ namespace FirstPlugin
                     Texture.TextureData.Add(ImageDataCached[i]);
             }
         }
+
+        internal void ReplaceBftex(string fileName, bool loadOpenGLTexture)
+        {
+            using (MemoryStream stream = new MemoryStream(File.ReadAllBytes(fileName)))
+                Texture.Import(stream, true);
+            Texture.Name = Text;
+            Load(Texture);
+            if (loadOpenGLTexture)
+                LoadOpenGLTexture();
+        }
+
         public void ApplyImportSettings(TextureImporterSettings setting,STCompressionMode CompressionMode, bool multiThread, bool force_srgb = false)
         {
             Cursor.Current = Cursors.WaitCursor;
@@ -1795,7 +1805,81 @@ namespace FirstPlugin
         }
         internal void SaveBinaryTexture(string FileName)
         {
-            Texture.Export(FileName, ParentBNTX.BinaryTexFile);
+            PrepareBinaryTextureExport();
+            try
+            {
+                Texture.Export(FileName, CreateBinaryTextureExportContext());
+            }
+            catch (NullReferenceException ex)
+            {
+                throw new InvalidOperationException($"Cannot export texture {Text} because the BFTEX export data is incomplete.", ex);
+            }
+        }
+
+        private BntxFile CreateBinaryTextureExportContext()
+        {
+            BntxFile parent = ParentBNTX.BinaryTexFile;
+            BntxFile exportContext = new BntxFile();
+            exportContext.Target = parent.Target ?? new char[] { 'N', 'X', ' ', ' ' };
+            exportContext.Name = string.IsNullOrEmpty(parent.Name) ? Text : parent.Name;
+            exportContext.Alignment = parent.Alignment == 0 ? 0xC : parent.Alignment;
+            exportContext.TargetAddressSize = parent.TargetAddressSize == 0 ? 0x40 : parent.TargetAddressSize;
+            exportContext.VersionMajor = parent.VersionMajor;
+            exportContext.VersionMajor2 = parent.VersionMajor2 == 0 && parent.VersionMajor == 0 && parent.VersionMinor == 0 && parent.VersionMinor2 == 0 ? 4 : parent.VersionMajor2;
+            exportContext.VersionMinor = parent.VersionMinor;
+            exportContext.VersionMinor2 = parent.VersionMinor2;
+            exportContext.Flag = parent.Flag;
+            exportContext.Textures = new List<Texture>();
+            exportContext.TextureDict = new ResDict();
+            exportContext.StringTable = new StringTable();
+            exportContext.RelocationTable = new RelocationTable();
+            exportContext.Textures.Add(Texture);
+            exportContext.TextureDict.Add(Text);
+            return exportContext;
+        }
+
+        private void PrepareBinaryTextureExport()
+        {
+            if (Texture == null)
+                throw new InvalidOperationException($"Cannot export texture {Text} because its texture data is unavailable.");
+            if (ParentBNTX?.BinaryTexFile == null)
+                throw new InvalidOperationException($"Cannot export texture {Text} because its parent BNTX is unavailable.");
+            if (string.IsNullOrWhiteSpace(Text))
+                throw new InvalidOperationException("Cannot export a texture with an empty name.");
+            if (Texture.TextureData == null || Texture.TextureData.Count == 0)
+                throw new InvalidOperationException($"Cannot export texture {Text} because its image data is unavailable.");
+
+            Texture.Name = Text;
+            if (string.IsNullOrWhiteSpace(Texture.Path))
+                Texture.Path = Text;
+            if (Texture.UserData == null)
+                Texture.UserData = new List<UserData>();
+            else if (Texture.UserData.Any(data => data == null || string.IsNullOrWhiteSpace(data.Name)))
+                Texture.UserData = Texture.UserData.Where(data => data != null && !string.IsNullOrWhiteSpace(data.Name)).ToList();
+            if (Texture.UserDataDict == null)
+                Texture.UserDataDict = new ResDict();
+            if (Texture.UserData.Count == 0)
+                Texture.UserDataDict = new ResDict();
+            if (Texture.Regs == null)
+                Texture.Regs = new uint[0];
+
+            for (int arrayIndex = 0; arrayIndex < Texture.TextureData.Count; arrayIndex++)
+            {
+                if (Texture.TextureData[arrayIndex] == null || Texture.TextureData[arrayIndex].Count == 0)
+                    throw new InvalidOperationException($"Cannot export texture {Text} because array level {arrayIndex} has no image data.");
+                if (Texture.TextureData[arrayIndex][0] == null)
+                    throw new InvalidOperationException($"Cannot export texture {Text} because array level {arrayIndex} has null image data.");
+            }
+
+            int mipCount = Math.Max(1, (int)Texture.MipCount);
+            if (Texture.MipOffsets == null || Texture.MipOffsets.Length == 0)
+                Texture.MipOffsets = new long[mipCount];
+            if (Texture.MipOffsets.Length < mipCount)
+            {
+                long[] mipOffsets = new long[mipCount];
+                Array.Copy(Texture.MipOffsets, mipOffsets, Texture.MipOffsets.Length);
+                Texture.MipOffsets = mipOffsets;
+            }
         }
     }
 }

@@ -23,7 +23,7 @@ namespace FirstPlugin
         {
             Model model = new Model();
             model.Name = fmdl.Text;
-            model.Path = "";
+            model.Path = fmdl.Model?.Path ?? "";
 
             model.Shapes = new List<Shape>();
             model.VertexBuffers = new List<VertexBuffer>();
@@ -55,6 +55,7 @@ namespace FirstPlugin
                 SetShape(shape, shape.Shape);
 
                 model.Shapes.Add(shape.Shape);
+                model.ShapeDict.Add(shape.Shape.Name);
                 model.VertexBuffers.Add(shape.VertexBuffer);
                 shape.Shape.VertexBufferIndex = (ushort)(model.VertexBuffers.Count - 1);
 
@@ -65,6 +66,7 @@ namespace FirstPlugin
 
                 SetMaterial(mat, mat.Material);
                 model.Materials.Add(mat.Material);
+                model.MaterialDict.Add(mat.Material.Name);
             }
             return model;
         }

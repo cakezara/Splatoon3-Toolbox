@@ -65,6 +65,10 @@
       <HintPath>..\packages\DirectXTexNet.1.0.0-rc3\lib\net40\DirectXTexNet.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="DiscordRPC">
+      <HintPath>..\Toolbox\Lib\DiscordRPC.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="Gl_EditorFramework">
       <HintPath>..\Toolbox\Gl_EditorFramework.dll</HintPath>
     </Reference>
@@ -457,6 +461,7 @@
     <Compile Include="Security\Cryptography\AesEncryption.cs" />
     <Compile Include="Security\Cryptography\crc32.cs" />
     <Compile Include="DrawableContainer.cs" />
+    <Compile Include="DiscordPresence.cs" />
     <Compile Include="Security\Cryptography\Crc64.cs" />
     <Compile Include="Security\Cryptography\mmh3.cs" />
     <Compile Include="StaticDynamic.cs" />
