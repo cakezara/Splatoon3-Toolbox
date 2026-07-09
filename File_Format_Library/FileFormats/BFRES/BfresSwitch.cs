@@ -21,6 +21,8 @@ namespace FirstPlugin
     {
         public static Model SetModel(FMDL fmdl)
         {
+            ValidateSwitchModel(fmdl);
+
             Model model = new Model();
             model.Name = fmdl.Text;
             model.Path = fmdl.Model?.Path ?? "";
@@ -69,6 +71,28 @@ namespace FirstPlugin
                 model.MaterialDict.Add(mat.Material.Name);
             }
             return model;
+        }
+
+        private static void ValidateSwitchModel(FMDL fmdl)
+        {
+            foreach (FMAT material in fmdl.materials.Values)
+            {
+                if (material.Material == null ||
+                    material.Material.ShaderAssign == null ||
+                    string.IsNullOrWhiteSpace(material.Material.ShaderAssign.ShaderArchiveName) ||
+                    string.IsNullOrWhiteSpace(material.Material.ShaderAssign.ShadingModelName) ||
+                    material.Material.RenderInfos == null ||
+                    material.Material.RenderInfos.Count == 0 ||
+                    material.Material.ShaderParams == null ||
+                    material.Material.ShaderParams.Count == 0)
+                    throw new InvalidOperationException($"{fmdl.Text}/{material.Text} does not contain a valid Switch material payload. Replace it with a valid BFMAT before saving.");
+            }
+
+            foreach (FSHP shape in fmdl.shapes)
+            {
+                if (shape.MaterialIndex < 0 || shape.MaterialIndex >= fmdl.materials.Count)
+                    throw new InvalidOperationException($"{fmdl.Text}/{shape.Text} has an invalid material index.");
+            }
         }
 
         public static void ReadModel(FMDL model, Model mdl)

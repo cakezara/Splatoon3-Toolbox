@@ -9,6 +9,7 @@ using ResU = Syroot.NintenTools.Bfres;
 using ResNX = Syroot.NintenTools.NSW.Bfres;
 using Toolbox.Library.Animations;
 using Toolbox.Library.Forms;
+using System.Linq;
 
 namespace Bfres.Structs
 {
@@ -396,6 +397,7 @@ namespace Bfres.Structs
                 fmdl.Model.VertexBuffers.Add(VertexBuffer);
 
                 BfresSwitch.ReadModel(fmdl, fmdl.Model);
+                ApplyDefaultSwitchMaterial(fmdl);
                 ((BFRES)Parent).DrawableContainer.Drawables.Add(fmdl.Skeleton);
             }
 
@@ -406,6 +408,53 @@ namespace Bfres.Structs
             }
 
             return fmdl;
+        }
+
+        private void ApplyDefaultSwitchMaterial(FMDL fmdl)
+        {
+            ResNX.Material template = GetDefaultSwitchMaterial();
+            ResNX.ResFile resFile = Parent is BFRES bfres ? bfres.resFile : null;
+            if (template == null || fmdl.materials.Count == 0 || resFile == null)
+                return;
+
+            FMAT material = fmdl.materials.Values.FirstOrDefault();
+            if (material == null)
+                return;
+
+            using (MemoryStream stream = new MemoryStream())
+            {
+                template.Export(stream, resFile, true);
+                stream.Position = 0;
+
+                ResNX.Material imported = new ResNX.Material();
+                imported.Import(stream, true);
+                imported.Name = material.Text;
+                material.Material = imported;
+                BfresSwitch.ReadMaterial(material, imported);
+            }
+        }
+
+        private ResNX.Material GetDefaultSwitchMaterial()
+        {
+            if (!(Parent is BFRES bfres))
+                return null;
+
+            foreach (BFRESGroupNode group in bfres.Nodes.OfType<BFRESGroupNode>())
+            {
+                if (group.Type != BRESGroupType.Models)
+                    continue;
+
+                foreach (FMDL model in group.Nodes.OfType<FMDL>())
+                {
+                    ResNX.Material material = model.materials.Values
+                        .Select(wrapper => wrapper.Material)
+                        .FirstOrDefault(candidate => candidate?.ShaderAssign?.ShaderArchiveName?.IndexOf("Hoian_UBER", StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (material != null)
+                        return material;
+                }
+            }
+
+            return null;
         }
 
         public void NewExternalFile()

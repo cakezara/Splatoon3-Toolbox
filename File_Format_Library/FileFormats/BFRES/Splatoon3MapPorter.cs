@@ -29,6 +29,7 @@ namespace FirstPlugin
     {
         public FMDL Model;
         public FMAT Material;
+        public FMAT SourceMaterial;
         public string PresetPath;
         public string Signature;
         public string Paintability;
@@ -141,6 +142,7 @@ namespace FirstPlugin
                     {
                         Model = model,
                         Material = material,
+                        SourceMaterial = material,
                         Signature = GetSignature(material, opaTextureName),
                         Paintability = "Unknown",
                         OpaTextureName = opaTextureName,
@@ -649,7 +651,14 @@ namespace FirstPlugin
                         if (material == null)
                             throw new InvalidOperationException($"The saved material {replacement.Model.Text}/{replacement.Material.Text} could not be validated.");
 
-                        if (!expectedMaterials.TryGetValue(replacement.PresetPath, out Syroot.NintenTools.NSW.Bfres.Material expected))
+                        Syroot.NintenTools.NSW.Bfres.Material expected;
+                        if (replacement.SourceMaterial?.Material != null)
+                        {
+                            expected = new Syroot.NintenTools.NSW.Bfres.Material();
+                            expected.Import(replacement.PresetPath);
+                            CopyCompatibleShaderParameterValues(expected, replacement.SourceMaterial.Material);
+                        }
+                        else if (!expectedMaterials.TryGetValue(replacement.PresetPath, out expected))
                         {
                             expected = new Syroot.NintenTools.NSW.Bfres.Material();
                             expected.Import(replacement.PresetPath);
@@ -696,7 +705,61 @@ namespace FirstPlugin
                 ValidateMaterialPayload(replacement.Material.Material, expected, $"{replacement.Model.Text}/{replacement.Material.Text}");
                 RestoreBakeTextures(replacement);
                 RestoreOpaTexture(replacement);
+                ApplySourceShaderParameterValues(replacement);
             }
+        }
+
+        private static void ApplySourceShaderParameterValues(Splatoon3MaterialReplacement replacement)
+        {
+            if (replacement.Material?.Material == null || replacement.SourceMaterial?.Material == null)
+                return;
+
+            if (CopyCompatibleShaderParameterValues(replacement.Material.Material, replacement.SourceMaterial.Material))
+                replacement.Material.ReadShaderParams(replacement.Material.Material);
+        }
+
+        private static bool CopyCompatibleShaderParameterValues(Syroot.NintenTools.NSW.Bfres.Material target, Syroot.NintenTools.NSW.Bfres.Material source)
+        {
+            if (target?.ShaderParams == null || source?.ShaderParams == null || target.ShaderParamData == null || source.ShaderParamData == null)
+                return false;
+
+            Dictionary<string, Syroot.NintenTools.NSW.Bfres.ShaderParam> sourceParams = source.ShaderParams
+                .Where(parameter => IsPortableSourceShaderParameterName(parameter.Name))
+                .GroupBy(parameter => parameter.Name, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            bool changed = false;
+            foreach (Syroot.NintenTools.NSW.Bfres.ShaderParam targetParam in target.ShaderParams)
+            {
+                if (!IsPortableSourceShaderParameterName(targetParam.Name) ||
+                    !sourceParams.TryGetValue(targetParam.Name, out Syroot.NintenTools.NSW.Bfres.ShaderParam sourceParam) ||
+                    sourceParam.Type != targetParam.Type ||
+                    sourceParam.DataSize != targetParam.DataSize ||
+                    !IsShaderParamRangeValid(source.ShaderParamData, sourceParam) ||
+                    !IsShaderParamRangeValid(target.ShaderParamData, targetParam))
+                    continue;
+
+                Array.Copy(source.ShaderParamData, (int)sourceParam.DataOffset, target.ShaderParamData, (int)targetParam.DataOffset, (int)targetParam.DataSize);
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        private static bool IsPortableSourceShaderParameterName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return false;
+
+            return !name.StartsWith("blitz_", StringComparison.OrdinalIgnoreCase) &&
+                   !name.StartsWith("enable_calc_", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsShaderParamRangeValid(byte[] data, Syroot.NintenTools.NSW.Bfres.ShaderParam parameter)
+        {
+            long offset = parameter.DataOffset;
+            long size = parameter.DataSize;
+            return offset >= 0 && size >= 0 && offset + size <= data.Length && offset <= int.MaxValue && size <= int.MaxValue;
         }
 
         private static void RestoreOpaTexture(Splatoon3MaterialReplacement replacement)

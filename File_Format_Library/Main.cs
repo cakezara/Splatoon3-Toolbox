@@ -62,11 +62,67 @@ namespace FirstPlugin
             public MenuExt()
             {
                 toolsExt[0] = new STToolStripItem("Splatoon 3");
-                if (string.IsNullOrWhiteSpace(Runtime.ProgramVersion) ||
-                    Runtime.ProgramVersion.Equals("Development", StringComparison.OrdinalIgnoreCase))
-                    toolsExt[0].DropDownItems.Add(new STToolStripItem("Port Splatoon 2 Map", PortSplatoon2Map));
+                toolsExt[0].DropDownItems.Add(new STToolStripItem("Port Splatoon 2 Map", PortSplatoon2Map));
+                toolsExt[0].DropDownItems.Add(new STToolStripItem("Create Actor Pack", CreateSplatoon3ActorPack));
                 toolsExt[0].DropDownItems.Add(new STToolStripItem("Texture Replacement", OpenTextureReplacementWindow));
                 toolsExt[0].DropDownItems.Add(new STToolStripItem("Apply Paint Fix", ApplyPaintFix));
+            }
+
+            private void CreateSplatoon3ActorPack(object sender, EventArgs e)
+            {
+                try
+                {
+                    string basePackPath = GetSplatoon3ActorBasePackPath();
+                    if (string.IsNullOrWhiteSpace(basePackPath))
+                    {
+                        MessageBox.Show("Base actor pack not found.\n\nExpected:\n" + Path.Combine(Runtime.ExecutableDir, "Bases", "Fld_Upland03.pack.zs"), "Actor Pack Creator", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    Splatoon3ActorPackTemplateInfo templateInfo = Splatoon3ActorPackCreator.ReadTemplateInfo(basePackPath);
+                    using (ActorPackCreatorForm form = new ActorPackCreatorForm(templateInfo))
+                    {
+                        if (form.ShowDialog() != DialogResult.OK)
+                            return;
+
+                        SaveFileDialog saveDialog = new SaveFileDialog();
+                        saveDialog.Title = "Save Splatoon 3 actor pack";
+                        saveDialog.Filter = "Splatoon 3 actor pack (*.pack.zs)|*.pack.zs|All files (*.*)|*.*";
+                        saveDialog.FileName = form.ActorName + ".pack.zs";
+                        saveDialog.DefaultExt = "pack.zs";
+
+                        if (saveDialog.ShowDialog() != DialogResult.OK)
+                            return;
+
+                        Splatoon3ActorPackCreateResult result = Splatoon3ActorPackCreator.Create(
+                            basePackPath,
+                            saveDialog.FileName,
+                            form.ActorName,
+                            form.SubModelPaths);
+
+                        MessageBox.Show(
+                            $"Actor pack created.\n\nTemplate: {templateInfo.SourceActorName}\nNew actor: {form.ActorName}\nFiles: {result.EntryCount}\nRenamed files: {result.RenamedEntryCount}\nUpdated BYML files: {result.UpdatedBymlCount}\nReference updates: {result.UpdatedStringCount}\nSubModels: {result.SubModelCount}",
+                            "Actor Pack Created",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Actor pack creation failed.\n\n{ex}", "Actor Pack Creator", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+
+            private string GetSplatoon3ActorBasePackPath()
+            {
+                string[] paths =
+                {
+                    Path.Combine(Runtime.ExecutableDir ?? "", "Bases", "Fld_Upland03.pack.zs"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? "", "Bases", "Fld_Upland03.pack.zs"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory ?? "", "Lib", "Plugins", "Bases", "Fld_Upland03.pack.zs"),
+                };
+
+                return paths.FirstOrDefault(File.Exists);
             }
 
             private void PortSplatoon2Map(object sender, EventArgs e)
@@ -107,6 +163,8 @@ namespace FirstPlugin
                     return;
 
                 List<Splatoon2MapPortSource> sources = new List<Splatoon2MapPortSource>();
+                List<FMDL> addedTargetModels = new List<FMDL>();
+                bool mapPortConfirmed = false;
                 try
                 {
                     foreach (string fileName in sourceDialog.FileNames)
@@ -166,24 +224,30 @@ namespace FirstPlugin
                     Dictionary<FMDL, BFRES> selectedSourceBfresByModel = sourceBfresByModel
                         .Where(entry => selectedSourceModels.Contains(entry.Key))
                         .ToDictionary(entry => entry.Key, entry => entry.Value);
-                    if (targetModels.Count < selectedSourceModels.Count)
+                    int originalTargetModelCount = targetModels.Count;
+                    addedTargetModels = EnsureTargetModelSlots(targetBfres, targetModels, selectedSourceModels);
+                    int addedTargetModelCount = addedTargetModels.Count;
+                    Dictionary<FMDL, FMDL> generatedTargetModelDefaults = GetGeneratedTargetModelDefaults(selectedSourceModels, originalTargetModelCount, addedTargetModels);
+
+                    Splatoon3MapPortAnalysis analysis = Splatoon3MapPorter.Analyze(selectedSourceModels, materialsFolder, selectedSourceBfresByModel);
+                    List<FMDL> selectedTargetModels = PromptModelPortMapping(selectedSourceModels, targetModels, sourceModelLabels, generatedTargetModelDefaults);
+                    if (selectedTargetModels == null)
                     {
-                        MessageBox.Show($"The active Splatoon 3 BFRES needs at least {selectedSourceModels.Count} models.\n\nSelected source models: {selectedSourceModels.Count}\nTarget models: {targetModels.Count}");
+                        RemoveAddedTargetModelSlots(targetBfres, targetModels, addedTargetModels);
                         return;
                     }
 
-                    Splatoon3MapPortAnalysis analysis = Splatoon3MapPorter.Analyze(selectedSourceModels, materialsFolder, selectedSourceBfresByModel);
-                    List<FMDL> selectedTargetModels = PromptModelPortMapping(selectedSourceModels, targetModels, sourceModelLabels);
-                    if (selectedTargetModels == null)
-                        return;
-
                     List<Splatoon3MaterialReplacement> selectedMaterialReplacements = PromptMaterialPortReplacements(analysis.MaterialProposals);
                     if (selectedMaterialReplacements == null)
+                    {
+                        RemoveAddedTargetModelSlots(targetBfres, targetModels, addedTargetModels);
                         return;
+                    }
 
                     if (selectedMaterialReplacements.Count != analysis.MaterialCount)
                     {
                         MessageBox.Show("Every imported Splatoon 2 material must be assigned a Splatoon 3 BFMAT before porting.");
+                        RemoveAddedTargetModelSlots(targetBfres, targetModels, addedTargetModels);
                         return;
                     }
 
@@ -193,7 +257,10 @@ namespace FirstPlugin
                     {
                         selectedTextureTransfers = PromptTexturePortTransfers(textureTransfers);
                         if (selectedTextureTransfers == null)
+                        {
+                            RemoveAddedTargetModelSlots(targetBfres, targetModels, addedTargetModels);
                             return;
+                        }
                     }
 
                     List<string> materialsNotSelected = analysis.MaterialProposals
@@ -212,14 +279,17 @@ namespace FirstPlugin
                         .Select((model, index) => $"{sourceModelLabels[model]} -> {selectedTargetModels[index].Text}"));
 
                     DialogResult result = MessageBox.Show(
-                        $"Port the selected Splatoon 2 geometry into the active Splatoon 3 BFRES?\n\nSource files: {sources.Count}\nSelected models: {selectedSourceModels.Count}\nSource models: {sourceModels.Count}\nTarget models: {targetModels.Count}\nShapes: {analysis.ShapeCount}\nMaterials: {analysis.MaterialCount}\nMaterial replacements selected: {selectedMaterialReplacements.Count}\nMaterials left unchanged: {analysis.MaterialCount - selectedMaterialReplacements.Count}\nTextures selected for BFTEX import: {selectedTextureTransfers.Count}\nTextures to add: {selectedTextureTransfers.Count(transfer => !transfer.ReplacesExisting)}\nTextures to replace: {selectedTextureTransfers.Count(transfer => transfer.ReplacesExisting)}\n\nModel mapping:\n{modelMapping}\n\nNot selected for replacement:\n{unmatchedPreview}\n\nMapped target skeletons and model metadata remain unchanged.",
+                        $"Port the selected Splatoon 2 geometry into the active Splatoon 3 BFRES?\n\nSource files: {sources.Count}\nSelected models: {selectedSourceModels.Count}\nSource models: {sourceModels.Count}\nOriginal target models: {originalTargetModelCount}\nNew target model slots added: {addedTargetModelCount}\nTarget models after adding slots: {targetModels.Count}\nShapes: {analysis.ShapeCount}\nMaterials: {analysis.MaterialCount}\nMaterial replacements selected: {selectedMaterialReplacements.Count}\nMaterials left unchanged: {analysis.MaterialCount - selectedMaterialReplacements.Count}\nTextures selected for BFTEX import: {selectedTextureTransfers.Count}\nTextures to add: {selectedTextureTransfers.Count(transfer => !transfer.ReplacesExisting)}\nTextures to replace: {selectedTextureTransfers.Count(transfer => transfer.ReplacesExisting)}\n\nModel mapping:\n{modelMapping}\n\nNot selected for replacement:\n{unmatchedPreview}\n\nMapped target skeletons and model metadata remain unchanged.",
                         "Port Splatoon 2 Map",
                         MessageBoxButtons.YesNo,
                         MessageBoxIcon.Warning);
 
                     if (result != DialogResult.Yes)
+                    {
+                        RemoveAddedTargetModelSlots(targetBfres, targetModels, addedTargetModels);
                         return;
-
+                    }
+                    mapPortConfirmed = true;
                     Cursor previousCursor = Cursor.Current;
                     Cursor.Current = Cursors.WaitCursor;
                     string portStage = "transferring models";
@@ -241,6 +311,7 @@ namespace FirstPlugin
                             {
                                 Model = selectedTargetModels[modelIndex],
                                 Material = targetMaterial,
+                                SourceMaterial = replacement.Material,
                                 PresetPath = replacement.PresetPath,
                                 Signature = replacement.Signature,
                                 Paintability = replacement.Paintability,
@@ -286,7 +357,7 @@ namespace FirstPlugin
                             missingTextureSummary += $"\n...and {textureResult.MissingTextures.Count - 16} more";
 
                         string completionMessage =
-                            $"Map port complete.\n\nTarget models replaced: {selectedSourceModels.Count}\nTarget models left unchanged: {targetModels.Count - selectedSourceModels.Count}\nShapes scaled: {targetAnalysis.ShapeCount}\nSplatoon 3 skeletons preserved: {selectedTargetModels.Count}\nMaterials replaced from BFMAT: {targetAnalysis.Replacements.Count}\nTextures added through BFTEX: {textureResult.Added}\nTextures replaced through BFTEX: {textureResult.Replaced}\nUnreferenced target textures removed: {textureResult.Removed}\nMissing final texture files: {textureResult.MissingTextures.Count}\n\nMissing texture files:\n{missingTextureSummary}\n\nThe active Splatoon 3 BFRES was modified. Save it normally when ready. The Splatoon 2 source was not modified.";
+                            $"Map port complete.\n\nTarget models replaced: {selectedSourceModels.Count}\nNew target model slots added: {addedTargetModelCount}\nTarget models left unchanged: {targetModels.Count - selectedSourceModels.Count}\nShapes scaled: {targetAnalysis.ShapeCount}\nSplatoon 3 skeletons preserved: {selectedTargetModels.Count}\nMaterials replaced from BFMAT: {targetAnalysis.Replacements.Count}\nTextures added through BFTEX: {textureResult.Added}\nTextures replaced through BFTEX: {textureResult.Replaced}\nUnreferenced target textures removed: {textureResult.Removed}\nMissing final texture files: {textureResult.MissingTextures.Count}\n\nMissing texture files:\n{missingTextureSummary}\n\nThe active Splatoon 3 BFRES was modified. Save it normally when ready. The Splatoon 2 source was not modified.";
                         MessageBox.Show(
                             completionMessage,
                             textureResult.MissingTextures.Count == 0 ? "Map Port Complete" : "Map Port Complete - Missing Textures",
@@ -304,6 +375,8 @@ namespace FirstPlugin
                 }
                 catch (Exception ex)
                 {
+                    if (!mapPortConfirmed)
+                        RemoveAddedTargetModelSlots(targetBfres, targetModels, addedTargetModels);
                     MessageBox.Show($"Failed to open the Splatoon 2 map sources.\n\n{ex.Message}");
                 }
                 finally
@@ -642,6 +715,87 @@ namespace FirstPlugin
                 }
 
                 return models;
+            }
+
+            private BFRESGroupNode GetBfresModelGroup(BFRES bfres)
+            {
+                return bfres.Nodes
+                    .OfType<BFRESGroupNode>()
+                    .FirstOrDefault(group => group.Type == BRESGroupType.Models);
+            }
+
+            private List<FMDL> EnsureTargetModelSlots(BFRES targetBfres, List<FMDL> targetModels, List<FMDL> selectedSourceModels)
+            {
+                List<FMDL> addedModels = new List<FMDL>();
+                int missingModelCount = selectedSourceModels.Count - targetModels.Count;
+                if (missingModelCount <= 0)
+                    return addedModels;
+
+                BFRESGroupNode modelGroup = GetBfresModelGroup(targetBfres);
+                if (modelGroup == null)
+                    throw new InvalidOperationException("The active Splatoon 3 BFRES does not contain a model folder.");
+
+                for (int i = targetModels.Count; i < selectedSourceModels.Count; i++)
+                {
+                    FMDL sourceModel = selectedSourceModels[i];
+                    FMDL targetModel = modelGroup.NewModel(true);
+                    RenameModelNode(modelGroup, targetModel, sourceModel.Text);
+                    targetModels.Add(targetModel);
+                    addedModels.Add(targetModel);
+                }
+
+                targetBfres.CanSave = true;
+                return addedModels;
+            }
+
+            private void RemoveAddedTargetModelSlots(BFRES targetBfres, List<FMDL> targetModels, List<FMDL> addedTargetModels)
+            {
+                if (addedTargetModels == null || addedTargetModels.Count == 0)
+                    return;
+
+                BFRESGroupNode modelGroup = GetBfresModelGroup(targetBfres);
+                if (modelGroup == null)
+                    return;
+
+                foreach (FMDL model in addedTargetModels)
+                {
+                    targetModels.Remove(model);
+                    modelGroup.RemoveChild(model);
+                    model.Unload();
+                }
+
+                targetBfres.CanSave = true;
+            }
+
+            private void RenameModelNode(BFRESGroupNode modelGroup, FMDL model, string name)
+            {
+                string oldName = model.Text;
+                if (modelGroup.ResourceNodes.ContainsKey(oldName))
+                    modelGroup.ResourceNodes.Remove(oldName);
+
+                model.Text = modelGroup.SearchDuplicateName(string.IsNullOrWhiteSpace(name) ? "NewModel" : name);
+                if (model.Model != null)
+                    model.Model.Name = model.Text;
+                if (model.ModelU != null)
+                    model.ModelU.Name = model.Text;
+
+                modelGroup.ResourceNodes[model.Text] = model;
+            }
+
+            private Dictionary<FMDL, FMDL> GetGeneratedTargetModelDefaults(List<FMDL> selectedSourceModels, int originalTargetModelCount, List<FMDL> addedTargetModels)
+            {
+                Dictionary<FMDL, FMDL> defaults = new Dictionary<FMDL, FMDL>();
+                if (addedTargetModels == null)
+                    return defaults;
+
+                for (int i = 0; i < addedTargetModels.Count; i++)
+                {
+                    int sourceIndex = originalTargetModelCount + i;
+                    if (sourceIndex >= 0 && sourceIndex < selectedSourceModels.Count)
+                        defaults[selectedSourceModels[sourceIndex]] = addedTargetModels[i];
+                }
+
+                return defaults;
             }
 
             private Dictionary<FMDL, BFRES> CreateSourceBfresByModel(List<Splatoon2MapPortSource> sources)
@@ -1747,9 +1901,9 @@ namespace FirstPlugin
                 return null;
             }
 
-            private List<FMDL> PromptModelPortMapping(List<FMDL> sourceModels, List<FMDL> targetModels, Dictionary<FMDL, string> sourceModelLabels)
+            private List<FMDL> PromptModelPortMapping(List<FMDL> sourceModels, List<FMDL> targetModels, Dictionary<FMDL, string> sourceModelLabels, Dictionary<FMDL, FMDL> defaultTargetModels)
             {
-                using (ModelPortMappingForm form = new ModelPortMappingForm(sourceModels, targetModels, sourceModelLabels))
+                using (ModelPortMappingForm form = new ModelPortMappingForm(sourceModels, targetModels, sourceModelLabels, defaultTargetModels))
                 {
                     if (form.ShowDialog() == DialogResult.OK)
                         return form.GetTargetModels();
@@ -1786,6 +1940,183 @@ namespace FirstPlugin
                 public BFRES SourceBfres;
                 public IFileFormat SourceContainer;
                 public List<FMDL> Models;
+            }
+
+            private class ActorPackCreatorForm : GenericEditorForm
+            {
+                private readonly UserControl contentControl;
+                private readonly Splatoon3ActorPackTemplateInfo templateInfo;
+                private readonly TextBox actorNameBox;
+                private readonly TextBox subModelsBox;
+                private readonly Button btnApply;
+                private readonly Button btnCancel;
+                private bool suppressSubModelEdit;
+                private bool subModelsEdited;
+
+                public string ActorName => actorNameBox.Text.Trim();
+                public List<string> SubModelPaths => subModelsBox.Lines
+                    .Select(line => line.Trim())
+                    .Where(line => !string.IsNullOrWhiteSpace(line))
+                    .ToList();
+
+                public ActorPackCreatorForm(Splatoon3ActorPackTemplateInfo templateInfo)
+                    : base(false, CreateContentControl(out UserControl control))
+                {
+                    contentControl = control;
+                    this.templateInfo = templateInfo;
+                    actorNameBox = new TextBox();
+                    subModelsBox = new TextBox();
+                    btnApply = new Button();
+                    btnCancel = new Button();
+
+                    Text = "Create Splatoon 3 Actor Pack";
+                    InitializeUI();
+                }
+
+                private static UserControl CreateContentControl(out UserControl control)
+                {
+                    control = new UserControl();
+                    control.Dock = DockStyle.Fill;
+                    return control;
+                }
+
+                private void InitializeUI()
+                {
+                    contentControl.Padding = new Padding(8);
+
+                    TableLayoutPanel root = new TableLayoutPanel();
+                    root.Dock = DockStyle.Fill;
+                    root.ColumnCount = 1;
+                    root.RowCount = 6;
+                    root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+                    root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                    root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                    root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                    root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                    root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+                    root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+                    Label description = new Label();
+                    description.Dock = DockStyle.Fill;
+                    description.Height = 58;
+                    description.ForeColor = Color.White;
+                    description.TextAlign = ContentAlignment.MiddleLeft;
+                    description.Text = $"Template actor: {templateInfo.SourceActorName}\nEnter the new actor name. SubModel FMDB paths can be edited, removed, or added one per line.";
+                    description.Margin = new Padding(0, 0, 0, 8);
+
+                    Label actorLabel = CreateLabel("New actor name");
+                    actorNameBox.Dock = DockStyle.Fill;
+                    actorNameBox.Text = templateInfo.SourceActorName;
+                    actorNameBox.BackColor = Color.FromArgb(45, 45, 45);
+                    actorNameBox.ForeColor = Color.White;
+                    actorNameBox.BorderStyle = BorderStyle.FixedSingle;
+                    actorNameBox.Margin = new Padding(0, 0, 0, 8);
+                    actorNameBox.TextChanged += ActorNameTextChanged;
+
+                    Label subModelLabel = CreateLabel("SubModel FMDBs");
+                    subModelsBox.Dock = DockStyle.Fill;
+                    subModelsBox.Multiline = true;
+                    subModelsBox.ScrollBars = ScrollBars.Both;
+                    subModelsBox.WordWrap = false;
+                    subModelsBox.AcceptsReturn = true;
+                    subModelsBox.AcceptsTab = true;
+                    subModelsBox.BackColor = Color.FromArgb(45, 45, 45);
+                    subModelsBox.ForeColor = Color.White;
+                    subModelsBox.BorderStyle = BorderStyle.FixedSingle;
+                    subModelsBox.Margin = new Padding(0, 0, 0, 8);
+                    subModelsBox.TextChanged += SubModelsTextChanged;
+                    SetSubModelsForActor(templateInfo.SourceActorName);
+
+                    FlowLayoutPanel bottomButtons = new FlowLayoutPanel();
+                    bottomButtons.Dock = DockStyle.Fill;
+                    bottomButtons.Height = 36;
+                    bottomButtons.FlowDirection = FlowDirection.RightToLeft;
+                    bottomButtons.WrapContents = false;
+                    bottomButtons.Margin = new Padding(0);
+
+                    btnApply.Text = "Create";
+                    btnApply.Width = 90;
+                    btnApply.Height = 28;
+                    btnApply.BackColor = Color.FromArgb(60, 60, 60);
+                    btnApply.ForeColor = Color.White;
+                    btnApply.FlatStyle = FlatStyle.Flat;
+                    btnApply.Margin = new Padding(0, 4, 0, 4);
+                    btnApply.Click += Apply;
+
+                    btnCancel.Text = "Cancel";
+                    btnCancel.DialogResult = DialogResult.Cancel;
+                    btnCancel.Width = 90;
+                    btnCancel.Height = 28;
+                    btnCancel.BackColor = Color.FromArgb(60, 60, 60);
+                    btnCancel.ForeColor = Color.White;
+                    btnCancel.FlatStyle = FlatStyle.Flat;
+                    btnCancel.Margin = new Padding(8, 4, 0, 4);
+
+                    bottomButtons.Controls.Add(btnCancel);
+                    bottomButtons.Controls.Add(btnApply);
+
+                    root.Controls.Add(description, 0, 0);
+                    root.Controls.Add(actorLabel, 0, 1);
+                    root.Controls.Add(actorNameBox, 0, 2);
+                    root.Controls.Add(subModelLabel, 0, 3);
+                    root.Controls.Add(subModelsBox, 0, 4);
+                    root.Controls.Add(bottomButtons, 0, 5);
+                    contentControl.Controls.Add(root);
+
+                    Width = 760;
+                    Height = 520;
+                    AcceptButton = btnApply;
+                    CancelButton = btnCancel;
+                }
+
+                private Label CreateLabel(string text)
+                {
+                    Label label = new Label();
+                    label.Dock = DockStyle.Fill;
+                    label.AutoSize = true;
+                    label.ForeColor = Color.White;
+                    label.TextAlign = ContentAlignment.MiddleLeft;
+                    label.Text = text;
+                    label.Padding = new Padding(0, 4, 0, 4);
+                    return label;
+                }
+
+                private void ActorNameTextChanged(object sender, EventArgs e)
+                {
+                    if (!subModelsEdited)
+                        SetSubModelsForActor(actorNameBox.Text.Trim());
+                }
+
+                private void SubModelsTextChanged(object sender, EventArgs e)
+                {
+                    if (!suppressSubModelEdit)
+                        subModelsEdited = true;
+                }
+
+                private void SetSubModelsForActor(string actorName)
+                {
+                    suppressSubModelEdit = true;
+                    subModelsBox.Lines = Splatoon3ActorPackCreator.ConvertSubModelPaths(templateInfo.SubModelPaths, templateInfo.SourceActorName, actorName).ToArray();
+                    suppressSubModelEdit = false;
+                }
+
+                private void Apply(object sender, EventArgs e)
+                {
+                    if (string.IsNullOrWhiteSpace(ActorName))
+                    {
+                        MessageBox.Show("Enter a new actor name.");
+                        return;
+                    }
+
+                    if (ActorName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                    {
+                        MessageBox.Show("The actor name contains invalid file name characters.");
+                        return;
+                    }
+
+                    DialogResult = DialogResult.OK;
+                    Close();
+                }
             }
 
             private class ModelPortSelectionForm : GenericEditorForm
@@ -1950,7 +2281,7 @@ namespace FirstPlugin
                 private readonly Button btnApply;
                 private readonly Button btnCancel;
 
-                public ModelPortMappingForm(List<FMDL> sourceModels, List<FMDL> targetModels, Dictionary<FMDL, string> sourceModelLabels)
+                public ModelPortMappingForm(List<FMDL> sourceModels, List<FMDL> targetModels, Dictionary<FMDL, string> sourceModelLabels, Dictionary<FMDL, FMDL> defaultTargetModels)
                     : base(false, CreateContentControl(out UserControl control))
                 {
                     contentControl = control;
@@ -1960,7 +2291,7 @@ namespace FirstPlugin
                     btnCancel = new Button();
 
                     Text = "Map Models to Splatoon 3";
-                    InitializeUI(sourceModels, sourceModelLabels);
+                    InitializeUI(sourceModels, sourceModelLabels, defaultTargetModels);
                 }
 
                 private static UserControl CreateContentControl(out UserControl control)
@@ -1970,7 +2301,7 @@ namespace FirstPlugin
                     return control;
                 }
 
-                private void InitializeUI(List<FMDL> sourceModels, Dictionary<FMDL, string> sourceModelLabels)
+                private void InitializeUI(List<FMDL> sourceModels, Dictionary<FMDL, string> sourceModelLabels, Dictionary<FMDL, FMDL> defaultTargetModels)
                 {
                     contentControl.Padding = new Padding(8);
 
@@ -2022,6 +2353,12 @@ namespace FirstPlugin
                         targetSelector.ForeColor = Color.White;
                         targetSelector.Margin = new Padding(4);
                         targetSelector.Items.AddRange(targetModels.Select(model => (object)model.Text).ToArray());
+                        if (defaultTargetModels != null && defaultTargetModels.TryGetValue(sourceModels[i], out FMDL defaultTargetModel))
+                        {
+                            int defaultIndex = targetModels.IndexOf(defaultTargetModel);
+                            if (defaultIndex >= 0)
+                                targetSelector.SelectedIndex = defaultIndex;
+                        }
                         targetSelectors.Add(targetSelector);
 
                         mappingTable.Controls.Add(sourceLabel, 0, i + 1);

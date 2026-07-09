@@ -260,6 +260,7 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="FileFormats\BFRES\Splatoon3MapPorter.cs" />
+    <Compile Include="FileFormats\Splatoon3\Splatoon3ActorPackCreator.cs" />
     <Compile Include="FileFormats\BSMAT\BSMATMaterialFile.cs" />
     <Compile Include="FileFormats\BSMAT\BSMAT.cs" />
     <Compile Include="FileFormats\BSMAT\NoFormattingConverter.cs" />
@@ -2341,10 +2342,12 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Resources\Hashes\MetroidDread.txt" />
+    <Content Include="Bases\Fld_Upland03.pack.zs" />
     <Content Include="Resources\Hashes\Pkmn.txt" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="CopyPluginToExecutableDirectory" AfterTargets="Build">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(TargetDir)..\..\" />
+    <Copy SourceFiles="Bases\Fld_Upland03.pack.zs" DestinationFolder="$(TargetDir)..\..\Bases\" />
   </Target>
 </Project>
