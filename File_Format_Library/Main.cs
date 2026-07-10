@@ -64,6 +64,7 @@ namespace FirstPlugin
                 toolsExt[0] = new STToolStripItem("Splatoon 3");
                 toolsExt[0].DropDownItems.Add(new STToolStripItem("Port Splatoon 2 Map", PortSplatoon2Map));
                 toolsExt[0].DropDownItems.Add(new STToolStripItem("Create Actor Pack", CreateSplatoon3ActorPack));
+                toolsExt[0].DropDownItems.Add(new STToolStripItem("Update ActorInfo RSDB", UpdateSplatoon3ActorInfoRsdb));
                 toolsExt[0].DropDownItems.Add(new STToolStripItem("Texture Replacement", OpenTextureReplacementWindow));
                 toolsExt[0].DropDownItems.Add(new STToolStripItem("Apply Paint Fix", ApplyPaintFix));
             }
@@ -105,6 +106,9 @@ namespace FirstPlugin
                             "Actor Pack Created",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Information);
+
+                        if (MessageBox.Show("Update ActorInfo.Product.b20.rstbl.byml.zs for this actor now?", "Update ActorInfo RSDB", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                            PromptUpdateActorInfoRsdb(form.ActorName);
                     }
                 }
                 catch (Exception ex)
@@ -123,6 +127,44 @@ namespace FirstPlugin
                 };
 
                 return paths.FirstOrDefault(File.Exists);
+            }
+
+            private void UpdateSplatoon3ActorInfoRsdb(object sender, EventArgs e)
+            {
+                PromptUpdateActorInfoRsdb("Fld_Ditch03");
+            }
+
+            private void PromptUpdateActorInfoRsdb(string actorName)
+            {
+                List<Splatoon3ActorInfoRsdbEntry> entries;
+                using (ActorInfoRsdbUpdateForm form = new ActorInfoRsdbUpdateForm(actorName))
+                {
+                    if (form.ShowDialog() != DialogResult.OK)
+                        return;
+                    entries = form.GetEntries();
+                }
+
+                OpenFileDialog openDialog = new OpenFileDialog();
+                openDialog.Title = "Choose ActorInfo.Product.b20.rstbl.byml.zs";
+                openDialog.Filter = "ActorInfo RSDB (*.byml.zs;*.byml)|*.byml.zs;*.byml|All files (*.*)|*.*";
+                openDialog.FileName = "ActorInfo.Product.b20.rstbl.byml.zs";
+
+                if (openDialog.ShowDialog() != DialogResult.OK)
+                    return;
+
+                try
+                {
+                    Splatoon3ActorInfoRsdbUpdateResult result = Splatoon3ActorInfoRsdbUpdater.AddActors(openDialog.FileName, entries);
+                    MessageBox.Show(
+                        $"ActorInfo RSDB updated.\n\nAdded:\n{string.Join("\n", result.RowIds)}\n\nPrevious entries: {result.PreviousCount}\nNew entries: {result.NewCount}\n\nExisting entries were not replaced.",
+                        "ActorInfo RSDB Updated",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"ActorInfo RSDB update failed.\n\n{ex}", "ActorInfo RSDB Updater", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
 
             private void PortSplatoon2Map(object sender, EventArgs e)
@@ -2116,6 +2158,348 @@ namespace FirstPlugin
 
                     DialogResult = DialogResult.OK;
                     Close();
+                }
+            }
+
+            private class ActorInfoRsdbUpdateForm : GenericEditorForm
+            {
+                private readonly UserControl contentControl;
+                private readonly DataGridView entryGrid;
+                private readonly Button btnAdd;
+                private readonly Button btnImport;
+                private readonly Button btnRemove;
+                private readonly Button btnApply;
+                private readonly Button btnCancel;
+
+                public ActorInfoRsdbUpdateForm(string actorName)
+                    : base(false, CreateContentControl(out UserControl control))
+                {
+                    contentControl = control;
+                    entryGrid = new DataGridView();
+                    btnAdd = new Button();
+                    btnImport = new Button();
+                    btnRemove = new Button();
+                    btnApply = new Button();
+                    btnCancel = new Button();
+
+                    Text = "Update ActorInfo RSDB";
+                    InitializeUI(actorName);
+                }
+
+                private static UserControl CreateContentControl(out UserControl control)
+                {
+                    control = new UserControl();
+                    control.Dock = DockStyle.Fill;
+                    return control;
+                }
+
+                private void InitializeUI(string actorName)
+                {
+                    contentControl.Padding = new Padding(8);
+
+                    TableLayoutPanel root = new TableLayoutPanel();
+                    root.Dock = DockStyle.Fill;
+                    root.ColumnCount = 1;
+                    root.RowCount = 4;
+                    root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+                    root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                    root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                    root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+                    root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+                    Label description = new Label();
+                    description.Dock = DockStyle.Fill;
+                    description.Height = 56;
+                    description.ForeColor = Color.White;
+                    description.TextAlign = ContentAlignment.MiddleLeft;
+                    description.Text = "Add ActorInfo rows. Actor/Model name is both the RSDB RowId and output FMDB filename. Model file/folder is the first FMDB path segment after VSGame.";
+                    description.Margin = new Padding(0, 0, 0, 8);
+
+                    FlowLayoutPanel topButtons = new FlowLayoutPanel();
+                    topButtons.Dock = DockStyle.Fill;
+                    topButtons.Height = 34;
+                    topButtons.WrapContents = false;
+                    topButtons.FlowDirection = FlowDirection.LeftToRight;
+                    topButtons.Margin = new Padding(0, 0, 0, 6);
+
+                    btnAdd.Text = "Add Entry";
+                    btnAdd.Width = 100;
+                    btnAdd.Height = 28;
+                    btnAdd.BackColor = Color.FromArgb(60, 60, 60);
+                    btnAdd.ForeColor = Color.White;
+                    btnAdd.FlatStyle = FlatStyle.Flat;
+                    btnAdd.Margin = new Padding(0, 2, 8, 2);
+                    btnAdd.Click += (sender, args) => AddEntryRow(Splatoon3ActorInfoRsdbUpdater.CreateDefaultEntry(actorName));
+
+                    btnImport.Text = "Import names from Model file";
+                    btnImport.Width = 190;
+                    btnImport.Height = 28;
+                    btnImport.BackColor = Color.FromArgb(60, 60, 60);
+                    btnImport.ForeColor = Color.White;
+                    btnImport.FlatStyle = FlatStyle.Flat;
+                    btnImport.Margin = new Padding(0, 2, 8, 2);
+                    btnImport.Click += ImportNamesFromModelFile;
+
+                    btnRemove.Text = "Remove Selected";
+                    btnRemove.Width = 130;
+                    btnRemove.Height = 28;
+                    btnRemove.BackColor = Color.FromArgb(60, 60, 60);
+                    btnRemove.ForeColor = Color.White;
+                    btnRemove.FlatStyle = FlatStyle.Flat;
+                    btnRemove.Margin = new Padding(0, 2, 8, 2);
+                    btnRemove.Click += RemoveSelectedRows;
+
+                    topButtons.Controls.Add(btnAdd);
+                    topButtons.Controls.Add(btnImport);
+                    topButtons.Controls.Add(btnRemove);
+
+                    entryGrid.Dock = DockStyle.Fill;
+                    entryGrid.AutoGenerateColumns = false;
+                    entryGrid.AllowUserToAddRows = true;
+                    entryGrid.AllowUserToDeleteRows = true;
+                    entryGrid.RowHeadersVisible = false;
+                    entryGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+                    entryGrid.MultiSelect = true;
+                    entryGrid.BackgroundColor = Color.FromArgb(45, 45, 45);
+                    entryGrid.GridColor = Color.FromArgb(70, 70, 70);
+                    entryGrid.ForeColor = Color.White;
+                    entryGrid.DefaultCellStyle.BackColor = Color.FromArgb(45, 45, 45);
+                    entryGrid.DefaultCellStyle.ForeColor = Color.White;
+                    entryGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(70, 70, 70);
+                    entryGrid.DefaultCellStyle.SelectionForeColor = Color.White;
+                    entryGrid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(50, 50, 50);
+                    entryGrid.AlternatingRowsDefaultCellStyle.ForeColor = Color.White;
+                    entryGrid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(60, 60, 60);
+                    entryGrid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+                    entryGrid.EnableHeadersVisualStyles = false;
+                    entryGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+                    entryGrid.Margin = new Padding(0, 0, 0, 8);
+                    entryGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Actor/Model name", FillWeight = 28 });
+                    entryGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Model file/folder", FillWeight = 22 });
+                    entryGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "FMDB preview", FillWeight = 62, ReadOnly = true });
+                    entryGrid.Columns.Add(new DataGridViewButtonColumn() { HeaderText = "", Text = "Delete", UseColumnTextForButtonValue = true, FillWeight = 12 });
+                    entryGrid.CellValueChanged += (sender, args) => UpdatePreview(args.RowIndex);
+                    entryGrid.CellClick += EntryGridCellClick;
+                    entryGrid.RowsAdded += (sender, args) =>
+                    {
+                        for (int i = args.RowIndex; i < args.RowIndex + args.RowCount; i++)
+                            UpdatePreview(i);
+                    };
+                    entryGrid.CurrentCellDirtyStateChanged += (sender, args) =>
+                    {
+                        if (entryGrid.IsCurrentCellDirty)
+                            entryGrid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+                    };
+
+                    AddEntryRow(Splatoon3ActorInfoRsdbUpdater.CreateDefaultEntry(actorName));
+
+                    FlowLayoutPanel bottomButtons = new FlowLayoutPanel();
+                    bottomButtons.Dock = DockStyle.Fill;
+                    bottomButtons.Height = 36;
+                    bottomButtons.FlowDirection = FlowDirection.RightToLeft;
+                    bottomButtons.WrapContents = false;
+                    bottomButtons.Margin = new Padding(0);
+
+                    btnApply.Text = "Update";
+                    btnApply.Width = 90;
+                    btnApply.Height = 28;
+                    btnApply.BackColor = Color.FromArgb(60, 60, 60);
+                    btnApply.ForeColor = Color.White;
+                    btnApply.FlatStyle = FlatStyle.Flat;
+                    btnApply.Margin = new Padding(0, 4, 0, 4);
+                    btnApply.Click += Apply;
+
+                    btnCancel.Text = "Cancel";
+                    btnCancel.DialogResult = DialogResult.Cancel;
+                    btnCancel.Width = 90;
+                    btnCancel.Height = 28;
+                    btnCancel.BackColor = Color.FromArgb(60, 60, 60);
+                    btnCancel.ForeColor = Color.White;
+                    btnCancel.FlatStyle = FlatStyle.Flat;
+                    btnCancel.Margin = new Padding(8, 4, 0, 4);
+
+                    bottomButtons.Controls.Add(btnCancel);
+                    bottomButtons.Controls.Add(btnApply);
+
+                    root.Controls.Add(description, 0, 0);
+                    root.Controls.Add(topButtons, 0, 1);
+                    root.Controls.Add(entryGrid, 0, 2);
+                    root.Controls.Add(bottomButtons, 0, 3);
+                    contentControl.Controls.Add(root);
+
+                    Width = 980;
+                    Height = 560;
+                    AcceptButton = btnApply;
+                    CancelButton = btnCancel;
+                }
+
+                private void AddEntryRow(Splatoon3ActorInfoRsdbEntry entry)
+                {
+                    int rowIndex = entryGrid.Rows.Add(entry.RowId, entry.ModelFile, "", "Delete");
+                    UpdatePreview(rowIndex);
+                }
+
+                private void ImportNamesFromModelFile(object sender, EventArgs e)
+                {
+                    OpenFileDialog openDialog = new OpenFileDialog();
+                    openDialog.Title = "Choose Splatoon 3 BFRES model files";
+                    openDialog.Filter = "Splatoon 3 BFRES (*.bfres.zs;*.bfres)|*.bfres.zs;*.bfres|All files (*.*)|*.*";
+                    openDialog.Multiselect = true;
+
+                    if (openDialog.ShowDialog() != DialogResult.OK)
+                        return;
+
+                    try
+                    {
+                        List<Splatoon3ActorInfoRsdbEntry> importedEntries = new List<Splatoon3ActorInfoRsdbEntry>();
+                        foreach (string fileName in openDialog.FileNames)
+                        {
+                            List<string> modelNames = ReadModelNames(fileName)
+                                .Where(name => !name.StartsWith("FldBG_", StringComparison.OrdinalIgnoreCase))
+                                .ToList();
+                            string modelFile = GetModelFileName(fileName);
+                            foreach (string modelName in modelNames)
+                            {
+                                importedEntries.Add(new Splatoon3ActorInfoRsdbEntry
+                                {
+                                    RowId = modelName,
+                                    ModelFile = modelFile,
+                                    ModelName = modelName,
+                                });
+                            }
+                        }
+
+                        if (importedEntries.Count == 0)
+                        {
+                            MessageBox.Show("The selected BFRES files have no importable models.");
+                            return;
+                        }
+
+                        entryGrid.Rows.Clear();
+                        foreach (Splatoon3ActorInfoRsdbEntry entry in importedEntries)
+                            AddEntryRow(entry);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Failed to import model names.\n\n{ex}", "Import Model Names", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+
+                private List<string> ReadModelNames(string fileName)
+                {
+                    byte[] data = File.ReadAllBytes(fileName);
+                    if (data.Length < 4 || data[0] != (byte)'F' || data[1] != (byte)'R' || data[2] != (byte)'E' || data[3] != (byte)'S')
+                    {
+                        Zstb compression = new Zstb();
+                        compression.Init(fileName);
+                        using (MemoryStream input = new MemoryStream(data))
+                        using (Stream output = compression.Decompress(input))
+                        using (MemoryStream memory = new MemoryStream())
+                        {
+                            output.CopyTo(memory);
+                            data = memory.ToArray();
+                        }
+                    }
+
+                    using (MemoryStream stream = new MemoryStream(data))
+                    {
+                        Syroot.NintenTools.NSW.Bfres.ResFile resFile = new Syroot.NintenTools.NSW.Bfres.ResFile(stream);
+                        return resFile.Models.Select(model => model.Name).Where(name => !string.IsNullOrWhiteSpace(name)).ToList();
+                    }
+                }
+
+                private string GetModelFileName(string fileName)
+                {
+                    string name = Path.GetFileName(fileName);
+                    if (name.EndsWith(".zs", StringComparison.OrdinalIgnoreCase))
+                        name = Path.GetFileNameWithoutExtension(name);
+                    if (name.EndsWith(".bfres", StringComparison.OrdinalIgnoreCase))
+                        name = Path.GetFileNameWithoutExtension(name);
+                    return name;
+                }
+
+                private void EntryGridCellClick(object sender, DataGridViewCellEventArgs e)
+                {
+                    if (e.RowIndex < 0 || e.ColumnIndex != 3 || e.RowIndex >= entryGrid.Rows.Count || entryGrid.Rows[e.RowIndex].IsNewRow)
+                        return;
+
+                    entryGrid.Rows.RemoveAt(e.RowIndex);
+                }
+
+                private void RemoveSelectedRows(object sender, EventArgs e)
+                {
+                    foreach (DataGridViewRow row in entryGrid.SelectedRows.Cast<DataGridViewRow>().Where(row => !row.IsNewRow).ToList())
+                        entryGrid.Rows.Remove(row);
+                }
+
+                private void UpdatePreview(int rowIndex)
+                {
+                    if (rowIndex < 0 || rowIndex >= entryGrid.Rows.Count || entryGrid.Rows[rowIndex].IsNewRow)
+                        return;
+
+                    DataGridViewRow row = entryGrid.Rows[rowIndex];
+                    string rowId = Convert.ToString(row.Cells[0].Value)?.Trim() ?? "";
+                    string modelFile = Convert.ToString(row.Cells[1].Value)?.Trim() ?? "";
+                    if (string.IsNullOrWhiteSpace(modelFile))
+                        modelFile = rowId;
+                    row.Cells[2].Value = $"Work/Model/Field/VSGame/{modelFile}/output/{rowId}.fmdb";
+                }
+
+                private void Apply(object sender, EventArgs e)
+                {
+                    entryGrid.EndEdit();
+                    List<Splatoon3ActorInfoRsdbEntry> entries = GetEntries();
+                    if (entries.Count == 0)
+                    {
+                        MessageBox.Show("Add at least one ActorInfo entry.");
+                        return;
+                    }
+
+                    if (entries.Any(entry => entry.RowId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                                             entry.ModelFile.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0))
+                    {
+                        MessageBox.Show("Entries cannot contain invalid file name characters.");
+                        return;
+                    }
+
+                    List<string> duplicates = entries.GroupBy(entry => entry.RowId, StringComparer.Ordinal)
+                        .Where(group => group.Count() > 1)
+                        .Select(group => group.Key)
+                        .ToList();
+                    if (duplicates.Count > 0)
+                    {
+                        MessageBox.Show("Duplicate RowId values:\n" + string.Join("\n", duplicates));
+                        return;
+                    }
+
+                    DialogResult = DialogResult.OK;
+                    Close();
+                }
+
+                public List<Splatoon3ActorInfoRsdbEntry> GetEntries()
+                {
+                    List<Splatoon3ActorInfoRsdbEntry> entries = new List<Splatoon3ActorInfoRsdbEntry>();
+                    foreach (DataGridViewRow row in entryGrid.Rows)
+                    {
+                        if (row.IsNewRow)
+                            continue;
+
+                        string rowId = Convert.ToString(row.Cells[0].Value)?.Trim() ?? "";
+                        string modelFile = Convert.ToString(row.Cells[1].Value)?.Trim() ?? "";
+                        if (string.IsNullOrWhiteSpace(rowId))
+                            continue;
+                        if (string.IsNullOrWhiteSpace(modelFile))
+                            modelFile = rowId;
+
+                        entries.Add(new Splatoon3ActorInfoRsdbEntry
+                        {
+                            RowId = rowId,
+                            ModelFile = modelFile,
+                            ModelName = rowId,
+                        });
+                    }
+
+                    return entries;
                 }
             }
 

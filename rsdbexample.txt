@@ -1,0 +1,10 @@
+  - CalcPriority: Before
+    Category: Field
+    ClassName: SplActor
+    Fmdb: Work/Model/Field/VSGame/Fld_Upland03/output/Fld_Upland03_Actor.fmdb
+    InstanceHeapSize: !l 2238128
+    IsCalcNodePushBack: true
+    IsFarActor: false
+    ModelAabbMax: {X: 986.36170, Y: 178.75000, Z: 631.97090}
+    ModelAabbMin: {X: -908.47130, Y: -33.77605, Z: -939.84310}
+    __RowId: Fld_Upland03_Actor
