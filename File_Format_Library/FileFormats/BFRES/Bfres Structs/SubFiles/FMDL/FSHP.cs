@@ -168,6 +168,7 @@ namespace Bfres.Structs
 
             Items.Add(new ToolStripMenuItem("Export", null, Export, Keys.Control | Keys.E));
             Items.Add(new ToolStripMenuItem("Replace (Static)", null, Replace, Keys.Control | Keys.R));
+            Items.Add(new ToolStripMenuItem("Transform Object", null, TransformObject));
             Items.Add(new ToolStripSeparator());
             Items.Add(new ToolStripMenuItem("Rename", null, Rename, Keys.Control | Keys.N));
             Items.Add(new ToolStripSeparator());
@@ -249,6 +250,60 @@ namespace Bfres.Structs
         public void SetMaterial(FMAT material)
         {
             ((FMDL)Parent.Parent).materials[material.Text] = material;
+        }
+
+        private void TransformObject(object sender, EventArgs args)
+        {
+            List<Vertex> backup = CloneVertices(vertices);
+            TransformMeshTool transform = new TransformMeshTool();
+            transform.LoadGenericMesh(this, () =>
+            {
+                SaveVertexBuffer(GetResFileU() != null);
+                UpdateVertexData();
+            });
+
+            if (transform.ShowDialog() != DialogResult.OK)
+            {
+                vertices = backup;
+                SaveVertexBuffer(GetResFileU() != null);
+                UpdateVertexData();
+            }
+            else
+            {
+                SaveVertexBuffer(GetResFileU() != null);
+                UpdateVertexData();
+            }
+        }
+
+        private List<Vertex> CloneVertices(List<Vertex> source)
+        {
+            List<Vertex> cloned = new List<Vertex>();
+            foreach (Vertex vertex in source)
+                cloned.Add(CloneVertex(vertex));
+            return cloned;
+        }
+
+        private Vertex CloneVertex(Vertex vertex)
+        {
+            Vertex clone = new Vertex();
+            clone.pos = vertex.pos;
+            clone.nrm = vertex.nrm;
+            clone.col = vertex.col;
+            clone.col2 = vertex.col2;
+            clone.col3 = vertex.col3;
+            clone.col4 = vertex.col4;
+            clone.uv0 = vertex.uv0;
+            clone.uv1 = vertex.uv1;
+            clone.uv2 = vertex.uv2;
+            clone.uv3 = vertex.uv3;
+            clone.tan = vertex.tan;
+            clone.bitan = vertex.bitan;
+            clone.boneIds = vertex.boneIds.ToList();
+            clone.boneWeights = vertex.boneWeights.ToList();
+            clone.normalW = vertex.normalW;
+            clone.boneNames = vertex.boneNames.ToList();
+            clone.boneList = vertex.boneList.ToList();
+            return clone;
         }
 
         public override void OnClick(TreeView treeView)

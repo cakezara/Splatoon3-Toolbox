@@ -22,7 +22,7 @@ namespace FirstPlugin
     public class FirstPlugin : IPlugin
     {
         public string Name => "First Plugin";
-        public string Description => "Custom Toolbox Extensions + Splatoon 3 Paint Fix";
+        public string Description => "Custom Toolbox Extensions";
         public string Author => "KXG";
         public string Version => "1.0";
 
@@ -62,11 +62,247 @@ namespace FirstPlugin
             public MenuExt()
             {
                 toolsExt[0] = new STToolStripItem("Splatoon 3");
-                toolsExt[0].DropDownItems.Add(new STToolStripItem("Port Splatoon 2 Map", PortSplatoon2Map));
+                if (IsThunderBuild())
+                    toolsExt[0].DropDownItems.Add(new STToolStripItem("Port Splatoon 2 Map", PortSplatoon2Map));
+                toolsExt[0].DropDownItems.Add(new STToolStripItem("Port Layout", PortSplatoon2Layout));
                 toolsExt[0].DropDownItems.Add(new STToolStripItem("Create Actor Pack", CreateSplatoon3ActorPack));
                 toolsExt[0].DropDownItems.Add(new STToolStripItem("Update ActorInfo RSDB", UpdateSplatoon3ActorInfoRsdb));
+                toolsExt[0].DropDownItems.Add(new STToolStripItem("Replace Actor Collision", ReplaceSplatoon3ActorCollision));
                 toolsExt[0].DropDownItems.Add(new STToolStripItem("Texture Replacement", OpenTextureReplacementWindow));
                 toolsExt[0].DropDownItems.Add(new STToolStripItem("Apply Paint Fix", ApplyPaintFix));
+            }
+
+            private bool IsThunderBuild()
+            {
+                return string.Equals(Runtime.ProgramVersion, "Thunder", StringComparison.OrdinalIgnoreCase);
+            }
+
+            private void PumpMessages()
+            {
+                if (Application.MessageLoop)
+                    Application.DoEvents();
+            }
+
+            private void ReplaceSplatoon3ActorCollision(object sender, EventArgs e)
+            {
+                OpenFileDialog openDialog = new OpenFileDialog();
+                openDialog.Title = "Choose Splatoon 3 actor packs";
+                openDialog.Filter = "Splatoon 3 actor packs (*.pack.zs;*.pack)|*.pack.zs;*.pack|All files (*.*)|*.*";
+                openDialog.Multiselect = true;
+
+                if (openDialog.ShowDialog() != DialogResult.OK)
+                    return;
+
+                List<Splatoon3CollisionReplaceEntry> entries;
+                using (ActorCollisionReplaceForm form = new ActorCollisionReplaceForm(openDialog.FileNames))
+                {
+                    if (form.ShowDialog() != DialogResult.OK)
+                        return;
+                    entries = form.GetEntries();
+                }
+
+                if (MessageBox.Show("Replace collision files in the selected actor packs now?\n\nThis overwrites the selected .pack/.pack.zs files.", "Replace Actor Collision", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                    return;
+
+                try
+                {
+                    Splatoon3CollisionReplaceResult result = Splatoon3CollisionReplacer.Replace(entries);
+                    MessageBox.Show(
+                        $"Collision replacement complete.\n\nActor packs updated: {result.Items.Count}\nCollision files replaced: {result.Items.Sum(item => item.ReplacedCount)}",
+                        "Replace Actor Collision",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Collision replacement failed.\n\n{ex}", "Replace Actor Collision", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+
+            private void PortSplatoon2Layout(object sender, EventArgs e)
+            {
+                OpenFileDialog openDialog = new OpenFileDialog();
+                openDialog.Title = "Choose Splatoon 2 layout BYAML";
+                openDialog.Filter = "Splatoon layout (*.byaml;*.byml;*.byaml.zs;*.byml.zs)|*.byaml;*.byml;*.byaml.zs;*.byml.zs|All files (*.*)|*.*";
+
+                if (openDialog.ShowDialog() != DialogResult.OK)
+                    return;
+
+                SaveFileDialog saveDialog = new SaveFileDialog();
+                saveDialog.Title = "Save Splatoon 3 layout BYML";
+                saveDialog.Filter = "Splatoon 3 layout (*.bcett.byml)|*.bcett.byml|Compressed Splatoon 3 layout (*.bcett.byml.zs)|*.bcett.byml.zs|All files (*.*)|*.*";
+                saveDialog.FileName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(openDialog.FileName)) + ".bcett.byml";
+                saveDialog.AddExtension = false;
+
+                if (saveDialog.ShowDialog() != DialogResult.OK)
+                    return;
+
+                try
+                {
+                    string outputPath = NormalizeSplatoon3LayoutOutputPath(saveDialog.FileName);
+                    Splatoon3LayoutPortResult result = Splatoon3LayoutPorter.Port(openDialog.FileName, outputPath);
+                    MessageBox.Show(
+                        $"Layout port created.\n\nSource objects: {result.SourceObjectCount}\nActors written: {result.ActorCount}\nPorted FLD/FLDOBJ objects: {result.FieldObjectCount}\nRails written: {result.RailCount}",
+                        "Splatoon 2 Layout Porter",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Layout port failed.\n\n{ex}", "Splatoon 2 Layout Porter", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+
+            private string NormalizeSplatoon3LayoutOutputPath(string fileName)
+            {
+                if (fileName.EndsWith(".bcett.byml.bcett.byml", StringComparison.OrdinalIgnoreCase))
+                    return fileName.Substring(0, fileName.Length - ".bcett.byml".Length);
+                if (fileName.EndsWith(".bcett.byml.zs.bcett.byml.zs", StringComparison.OrdinalIgnoreCase))
+                    return fileName.Substring(0, fileName.Length - ".bcett.byml.zs".Length);
+                return fileName;
+            }
+
+            private class ActorCollisionReplaceForm : Form
+            {
+                private readonly DataGridView grid = new DataGridView();
+
+                public ActorCollisionReplaceForm(IEnumerable<string> packPaths)
+                {
+                    Text = "Replace Actor Collision";
+                    Width = 900;
+                    Height = 420;
+                    StartPosition = FormStartPosition.CenterParent;
+                    BackColor = FormThemes.BaseTheme.FormBackColor;
+                    ForeColor = FormThemes.BaseTheme.FormForeColor;
+
+                    grid.Dock = DockStyle.Fill;
+                    grid.AllowUserToAddRows = false;
+                    grid.AllowUserToDeleteRows = false;
+                    grid.RowHeadersVisible = false;
+                    grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
+                    grid.BackgroundColor = Color.FromArgb(45, 45, 45);
+                    grid.GridColor = Color.FromArgb(70, 70, 70);
+                    grid.ForeColor = Color.White;
+                    grid.DefaultCellStyle.BackColor = Color.FromArgb(45, 45, 45);
+                    grid.DefaultCellStyle.ForeColor = Color.White;
+                    grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(70, 70, 70);
+                    grid.DefaultCellStyle.SelectionForeColor = Color.White;
+                    grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(50, 50, 50);
+                    grid.AlternatingRowsDefaultCellStyle.ForeColor = Color.White;
+                    grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(60, 60, 60);
+                    grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+                    grid.EnableHeadersVisualStyles = false;
+
+                    DataGridViewTextBoxColumn packColumn = new DataGridViewTextBoxColumn();
+                    packColumn.HeaderText = "Actor pack";
+                    packColumn.Name = "PackPath";
+                    packColumn.ReadOnly = true;
+                    packColumn.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                    packColumn.FillWeight = 55;
+                    grid.Columns.Add(packColumn);
+
+                    DataGridViewTextBoxColumn collisionColumn = new DataGridViewTextBoxColumn();
+                    collisionColumn.HeaderText = "Replacement .bphsh";
+                    collisionColumn.Name = "CollisionPath";
+                    collisionColumn.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                    collisionColumn.FillWeight = 45;
+                    grid.Columns.Add(collisionColumn);
+
+                    DataGridViewButtonColumn browseColumn = new DataGridViewButtonColumn();
+                    browseColumn.HeaderText = "";
+                    browseColumn.Name = "Browse";
+                    browseColumn.Text = "Browse";
+                    browseColumn.UseColumnTextForButtonValue = true;
+                    browseColumn.Width = 80;
+                    grid.Columns.Add(browseColumn);
+
+                    foreach (string packPath in packPaths ?? new string[0])
+                        grid.Rows.Add(packPath, "");
+
+                    grid.CellContentClick += Grid_CellContentClick;
+                    grid.EditingControlShowing += Grid_EditingControlShowing;
+
+                    FlowLayoutPanel buttons = new FlowLayoutPanel();
+                    buttons.Dock = DockStyle.Bottom;
+                    buttons.FlowDirection = FlowDirection.RightToLeft;
+                    buttons.Height = 42;
+                    buttons.Padding = new Padding(6);
+
+                    Button okButton = new Button();
+                    okButton.Text = "Replace";
+                    okButton.Width = 90;
+                    okButton.Click += OkButton_Click;
+
+                    Button cancelButton = new Button();
+                    cancelButton.Text = "Cancel";
+                    cancelButton.Width = 90;
+                    cancelButton.DialogResult = DialogResult.Cancel;
+
+                    buttons.Controls.Add(okButton);
+                    buttons.Controls.Add(cancelButton);
+                    Controls.Add(grid);
+                    Controls.Add(buttons);
+                    AcceptButton = okButton;
+                    CancelButton = cancelButton;
+                }
+
+                private void Grid_EditingControlShowing(object sender, DataGridViewEditingControlShowingEventArgs e)
+                {
+                    e.Control.BackColor = Color.FromArgb(45, 45, 45);
+                    e.Control.ForeColor = Color.White;
+                }
+
+                private void Grid_CellContentClick(object sender, DataGridViewCellEventArgs e)
+                {
+                    if (e.RowIndex < 0 || e.ColumnIndex < 0)
+                        return;
+                    if (grid.Columns[e.ColumnIndex].Name != "Browse")
+                        return;
+
+                    OpenFileDialog openDialog = new OpenFileDialog();
+                    openDialog.Title = "Choose replacement .bphsh";
+                    openDialog.Filter = "Phive shape collision (*.bphsh)|*.bphsh|All files (*.*)|*.*";
+                    if (openDialog.ShowDialog() == DialogResult.OK)
+                        grid.Rows[e.RowIndex].Cells["CollisionPath"].Value = openDialog.FileName;
+                }
+
+                private void OkButton_Click(object sender, EventArgs e)
+                {
+                    try
+                    {
+                        GetEntries();
+                        DialogResult = DialogResult.OK;
+                        Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(ex.Message, "Replace Actor Collision", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+
+                public List<Splatoon3CollisionReplaceEntry> GetEntries()
+                {
+                    List<Splatoon3CollisionReplaceEntry> entries = new List<Splatoon3CollisionReplaceEntry>();
+                    foreach (DataGridViewRow row in grid.Rows)
+                    {
+                        string packPath = Convert.ToString(row.Cells["PackPath"].Value)?.Trim() ?? "";
+                        string collisionPath = Convert.ToString(row.Cells["CollisionPath"].Value)?.Trim() ?? "";
+                        if (string.IsNullOrWhiteSpace(packPath))
+                            continue;
+                        if (string.IsNullOrWhiteSpace(collisionPath))
+                            throw new InvalidOperationException($"Select a replacement .bphsh for:\n{packPath}");
+
+                        entries.Add(new Splatoon3CollisionReplaceEntry
+                        {
+                            PackPath = packPath,
+                            CollisionPath = collisionPath,
+                        });
+                    }
+
+                    if (entries.Count == 0)
+                        throw new InvalidOperationException("Add at least one actor pack.");
+                    return entries;
+                }
             }
 
             private void CreateSplatoon3ActorPack(object sender, EventArgs e)
@@ -86,29 +322,64 @@ namespace FirstPlugin
                         if (form.ShowDialog() != DialogResult.OK)
                             return;
 
-                        SaveFileDialog saveDialog = new SaveFileDialog();
-                        saveDialog.Title = "Save Splatoon 3 actor pack";
-                        saveDialog.Filter = "Splatoon 3 actor pack (*.pack.zs)|*.pack.zs|All files (*.*)|*.*";
-                        saveDialog.FileName = form.ActorName + ".pack.zs";
-                        saveDialog.DefaultExt = "pack.zs";
+                        List<string> actorNames = form.ActorNames;
+                        if (actorNames.Count == 1)
+                        {
+                            string modelFileName = form.GetModelFileNameForActor(actorNames[0]);
+                            SaveFileDialog saveDialog = new SaveFileDialog();
+                            saveDialog.Title = "Save Splatoon 3 actor pack";
+                            saveDialog.Filter = "Splatoon 3 actor pack (*.pack.zs)|*.pack.zs|All files (*.*)|*.*";
+                            saveDialog.FileName = actorNames[0] + ".pack.zs";
+                            saveDialog.DefaultExt = "pack.zs";
 
-                        if (saveDialog.ShowDialog() != DialogResult.OK)
-                            return;
+                            if (saveDialog.ShowDialog() != DialogResult.OK)
+                                return;
 
-                        Splatoon3ActorPackCreateResult result = Splatoon3ActorPackCreator.Create(
-                            basePackPath,
-                            saveDialog.FileName,
-                            form.ActorName,
-                            form.SubModelPaths);
+                            Splatoon3ActorPackCreateResult result = Splatoon3ActorPackCreator.Create(
+                                basePackPath,
+                                saveDialog.FileName,
+                                actorNames[0],
+                                modelFileName,
+                                actorNames[0] == form.MainActorName ? form.SubModelPaths : new List<string>());
 
-                        MessageBox.Show(
-                            $"Actor pack created.\n\nTemplate: {templateInfo.SourceActorName}\nNew actor: {form.ActorName}\nFiles: {result.EntryCount}\nRenamed files: {result.RenamedEntryCount}\nUpdated BYML files: {result.UpdatedBymlCount}\nReference updates: {result.UpdatedStringCount}\nSubModels: {result.SubModelCount}",
-                            "Actor Pack Created",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Information);
+                            MessageBox.Show(
+                                $"Actor pack created.\n\nTemplate: {templateInfo.SourceActorName}\nNew actor: {actorNames[0]}\nFiles: {result.EntryCount}\nRenamed files: {result.RenamedEntryCount}\nUpdated BYML files: {result.UpdatedBymlCount}\nReference updates: {result.UpdatedStringCount}\nSubModels: {result.SubModelCount}",
+                                "Actor Pack Created",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information);
 
-                        if (MessageBox.Show("Update ActorInfo.Product.b20.rstbl.byml.zs for this actor now?", "Update ActorInfo RSDB", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-                            PromptUpdateActorInfoRsdb(form.ActorName);
+                            if (MessageBox.Show("Update ActorInfo.Product.b20.rstbl.byml.zs for this actor now?", "Update ActorInfo RSDB", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                                PromptUpdateActorInfoRsdb(actorNames[0]);
+                        }
+                        else
+                        {
+                            FolderBrowserDialog folderDialog = new FolderBrowserDialog();
+                            folderDialog.Description = "Choose a folder for the actor packs";
+                            if (folderDialog.ShowDialog() != DialogResult.OK)
+                                return;
+
+                            List<Splatoon3ActorPackCreateResult> results = new List<Splatoon3ActorPackCreateResult>();
+                            foreach (string actorName in actorNames)
+                            {
+                                string modelFileName = form.GetModelFileNameForActor(actorName);
+                                string outputPath = Path.Combine(folderDialog.SelectedPath, actorName + ".pack.zs");
+                                results.Add(Splatoon3ActorPackCreator.Create(
+                                    basePackPath,
+                                    outputPath,
+                                    actorName,
+                                    modelFileName,
+                                    actorName == form.MainActorName ? form.SubModelPaths : new List<string>()));
+                            }
+
+                            MessageBox.Show(
+                                $"Actor packs created.\n\nTemplate: {templateInfo.SourceActorName}\nActors: {actorNames.Count}\nOutput folder: {folderDialog.SelectedPath}\nSubModel actor: {form.MainActorName}",
+                                "Actor Packs Created",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information);
+
+                            if (MessageBox.Show("Update ActorInfo.Product.b20.rstbl.byml.zs for these actors now?", "Update ActorInfo RSDB", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+                                PromptUpdateActorInfoRsdb(actorNames[0]);
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -338,7 +609,9 @@ namespace FirstPlugin
 
                     try
                     {
+                        PumpMessages();
                         Splatoon3MapPorter.ReplaceTargetModels(selectedSourceModels, selectedTargetModels);
+                        PumpMessages();
                         portStage = "applying materials";
                         Splatoon3MapPortAnalysis targetAnalysis = Splatoon3MapPorter.Analyze(selectedTargetModels, materialsFolder);
                         targetAnalysis.Replacements.Clear();
@@ -366,8 +639,10 @@ namespace FirstPlugin
                         }
 
                         Splatoon3MapPorter.Apply(selectedTargetModels, targetAnalysis);
+                        PumpMessages();
                         targetBfres.CanSave = true;
                         LibraryGUI.UpdateViewport();
+                        PumpMessages();
 
                         Cursor.Current = previousCursor;
                         portStage = "replacing material texture references";
@@ -380,16 +655,21 @@ namespace FirstPlugin
                                 .Where(replacement => replacement.UsePresetTextures)
                                 .Select(replacement => replacement.Material)),
                             true);
+                        PumpMessages();
                         portStage = "importing selected Splatoon 2 textures";
                         Cursor.Current = Cursors.WaitCursor;
                         Splatoon3TextureTransferResult textureResult = selectedTextureTransfers.Count == 0
                             ? new Splatoon3TextureTransferResult()
                             : Splatoon3MapPorter.TransferTextures(targetBfres, selectedTextureTransfers);
+                        PumpMessages();
                         portStage = "removing unreferenced target textures";
                         Splatoon3MapPorter.RemoveUnreferencedTextures(targetBfres, targetModels, selectedTextureTransfers, textureResult);
+                        PumpMessages();
                         Splatoon3MapPorter.ValidateTextureReferences(targetBfres, targetModels, textureResult);
+                        PumpMessages();
                         portStage = "validating the BFRES save";
                         Splatoon3MapPorter.ValidateSave(targetBfres, targetAnalysis.Replacements, selectedTextureTransfers);
+                        PumpMessages();
                         Cursor.Current = previousCursor;
 
                         string missingTextureSummary = textureResult.MissingTextures.Count == 0
@@ -1988,14 +2268,20 @@ namespace FirstPlugin
             {
                 private readonly UserControl contentControl;
                 private readonly Splatoon3ActorPackTemplateInfo templateInfo;
-                private readonly TextBox actorNameBox;
+                private readonly DataGridView actorGrid;
                 private readonly TextBox subModelsBox;
+                private readonly Label subModelLabel;
+                private readonly Button btnAdd;
+                private readonly Button btnImport;
+                private readonly Button btnRemove;
                 private readonly Button btnApply;
                 private readonly Button btnCancel;
                 private bool suppressSubModelEdit;
                 private bool subModelsEdited;
+                private string mainActorName;
 
-                public string ActorName => actorNameBox.Text.Trim();
+                public List<string> ActorNames => GetActorNames();
+                public string MainActorName => mainActorName;
                 public List<string> SubModelPaths => subModelsBox.Lines
                     .Select(line => line.Trim())
                     .Where(line => !string.IsNullOrWhiteSpace(line))
@@ -2006,8 +2292,12 @@ namespace FirstPlugin
                 {
                     contentControl = control;
                     this.templateInfo = templateInfo;
-                    actorNameBox = new TextBox();
+                    actorGrid = new DataGridView();
                     subModelsBox = new TextBox();
+                    subModelLabel = new Label();
+                    btnAdd = new Button();
+                    btnImport = new Button();
+                    btnRemove = new Button();
                     btnApply = new Button();
                     btnCancel = new Button();
 
@@ -2033,9 +2323,9 @@ namespace FirstPlugin
                     root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
                     root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
                     root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                    root.RowStyles.Add(new RowStyle(SizeType.Percent, 58f));
                     root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-                    root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-                    root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+                    root.RowStyles.Add(new RowStyle(SizeType.Percent, 42f));
                     root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
                     Label description = new Label();
@@ -2043,19 +2333,88 @@ namespace FirstPlugin
                     description.Height = 58;
                     description.ForeColor = Color.White;
                     description.TextAlign = ContentAlignment.MiddleLeft;
-                    description.Text = $"Template actor: {templateInfo.SourceActorName}\nEnter the new actor name. SubModel FMDB paths can be edited, removed, or added one per line.";
+                    description.Text = $"Template actor: {templateInfo.SourceActorName}\nAdd actor pack names or import them from a model file. Only the main Fld_* actor uses SubModel FMDBs.";
                     description.Margin = new Padding(0, 0, 0, 8);
 
-                    Label actorLabel = CreateLabel("New actor name");
-                    actorNameBox.Dock = DockStyle.Fill;
-                    actorNameBox.Text = templateInfo.SourceActorName;
-                    actorNameBox.BackColor = Color.FromArgb(45, 45, 45);
-                    actorNameBox.ForeColor = Color.White;
-                    actorNameBox.BorderStyle = BorderStyle.FixedSingle;
-                    actorNameBox.Margin = new Padding(0, 0, 0, 8);
-                    actorNameBox.TextChanged += ActorNameTextChanged;
+                    FlowLayoutPanel topButtons = new FlowLayoutPanel();
+                    topButtons.Dock = DockStyle.Fill;
+                    topButtons.Height = 34;
+                    topButtons.WrapContents = false;
+                    topButtons.FlowDirection = FlowDirection.LeftToRight;
+                    topButtons.Margin = new Padding(0, 0, 0, 6);
 
-                    Label subModelLabel = CreateLabel("SubModel FMDBs");
+                    btnAdd.Text = "Add Actor";
+                    btnAdd.Width = 100;
+                    btnAdd.Height = 28;
+                    btnAdd.BackColor = Color.FromArgb(60, 60, 60);
+                    btnAdd.ForeColor = Color.White;
+                    btnAdd.FlatStyle = FlatStyle.Flat;
+                    btnAdd.Margin = new Padding(0, 2, 8, 2);
+                    btnAdd.Click += (sender, args) => AddActorRow(templateInfo.SourceActorName);
+
+                    btnImport.Text = "Import names from Model file";
+                    btnImport.Width = 190;
+                    btnImport.Height = 28;
+                    btnImport.BackColor = Color.FromArgb(60, 60, 60);
+                    btnImport.ForeColor = Color.White;
+                    btnImport.FlatStyle = FlatStyle.Flat;
+                    btnImport.Margin = new Padding(0, 2, 8, 2);
+                    btnImport.Click += ImportNamesFromModelFile;
+
+                    btnRemove.Text = "Remove Selected";
+                    btnRemove.Width = 130;
+                    btnRemove.Height = 28;
+                    btnRemove.BackColor = Color.FromArgb(60, 60, 60);
+                    btnRemove.ForeColor = Color.White;
+                    btnRemove.FlatStyle = FlatStyle.Flat;
+                    btnRemove.Margin = new Padding(0, 2, 8, 2);
+                    btnRemove.Click += RemoveSelectedRows;
+
+                    topButtons.Controls.Add(btnAdd);
+                    topButtons.Controls.Add(btnImport);
+                    topButtons.Controls.Add(btnRemove);
+
+                    actorGrid.Dock = DockStyle.Fill;
+                    actorGrid.AutoGenerateColumns = false;
+                    actorGrid.AllowUserToAddRows = true;
+                    actorGrid.AllowUserToDeleteRows = true;
+                    actorGrid.RowHeadersVisible = false;
+                    actorGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+                    actorGrid.MultiSelect = true;
+                    actorGrid.BackgroundColor = Color.FromArgb(45, 45, 45);
+                    actorGrid.GridColor = Color.FromArgb(70, 70, 70);
+                    actorGrid.ForeColor = Color.White;
+                    actorGrid.DefaultCellStyle.BackColor = Color.FromArgb(45, 45, 45);
+                    actorGrid.DefaultCellStyle.ForeColor = Color.White;
+                    actorGrid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(70, 70, 70);
+                    actorGrid.DefaultCellStyle.SelectionForeColor = Color.White;
+                    actorGrid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(50, 50, 50);
+                    actorGrid.AlternatingRowsDefaultCellStyle.ForeColor = Color.White;
+                    actorGrid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(60, 60, 60);
+                    actorGrid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+                    actorGrid.EnableHeadersVisualStyles = false;
+                    actorGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+                    actorGrid.Margin = new Padding(0, 0, 0, 8);
+                    actorGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Actor pack name", FillWeight = 42 });
+                    actorGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "Model file/folder", FillWeight = 38 });
+                    actorGrid.Columns.Add(new DataGridViewTextBoxColumn() { HeaderText = "SubModels", FillWeight = 20, ReadOnly = true });
+                    actorGrid.Columns.Add(new DataGridViewButtonColumn() { HeaderText = "", Text = "Delete", UseColumnTextForButtonValue = true, FillWeight = 12 });
+                    actorGrid.CellClick += ActorGridCellClick;
+                    actorGrid.CellValueChanged += (sender, args) => RefreshMainActor();
+                    actorGrid.RowsAdded += (sender, args) => RefreshMainActor();
+                    actorGrid.RowsRemoved += (sender, args) => RefreshMainActor();
+                    actorGrid.EditingControlShowing += ActorGridEditingControlShowing;
+                    actorGrid.CurrentCellDirtyStateChanged += (sender, args) =>
+                    {
+                        if (actorGrid.IsCurrentCellDirty)
+                            actorGrid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+                    };
+
+                    subModelLabel.Dock = DockStyle.Fill;
+                    subModelLabel.AutoSize = true;
+                    subModelLabel.ForeColor = Color.White;
+                    subModelLabel.TextAlign = ContentAlignment.MiddleLeft;
+                    subModelLabel.Padding = new Padding(0, 4, 0, 4);
                     subModelsBox.Dock = DockStyle.Fill;
                     subModelsBox.Multiline = true;
                     subModelsBox.ScrollBars = ScrollBars.Both;
@@ -2067,7 +2426,7 @@ namespace FirstPlugin
                     subModelsBox.BorderStyle = BorderStyle.FixedSingle;
                     subModelsBox.Margin = new Padding(0, 0, 0, 8);
                     subModelsBox.TextChanged += SubModelsTextChanged;
-                    SetSubModelsForActor(templateInfo.SourceActorName);
+                    AddActorRow(templateInfo.SourceActorName);
 
                     FlowLayoutPanel bottomButtons = new FlowLayoutPanel();
                     bottomButtons.Dock = DockStyle.Fill;
@@ -2098,15 +2457,15 @@ namespace FirstPlugin
                     bottomButtons.Controls.Add(btnApply);
 
                     root.Controls.Add(description, 0, 0);
-                    root.Controls.Add(actorLabel, 0, 1);
-                    root.Controls.Add(actorNameBox, 0, 2);
+                    root.Controls.Add(topButtons, 0, 1);
+                    root.Controls.Add(actorGrid, 0, 2);
                     root.Controls.Add(subModelLabel, 0, 3);
                     root.Controls.Add(subModelsBox, 0, 4);
                     root.Controls.Add(bottomButtons, 0, 5);
                     contentControl.Controls.Add(root);
 
-                    Width = 760;
-                    Height = 520;
+                    Width = 920;
+                    Height = 620;
                     AcceptButton = btnApply;
                     CancelButton = btnCancel;
                 }
@@ -2123,10 +2482,118 @@ namespace FirstPlugin
                     return label;
                 }
 
-                private void ActorNameTextChanged(object sender, EventArgs e)
+                private void ActorGridEditingControlShowing(object sender, DataGridViewEditingControlShowingEventArgs e)
                 {
-                    if (!subModelsEdited)
-                        SetSubModelsForActor(actorNameBox.Text.Trim());
+                    e.Control.BackColor = Color.FromArgb(45, 45, 45);
+                    e.Control.ForeColor = Color.White;
+                }
+
+                private void AddActorRow(string actorName)
+                {
+                    AddActorRow(actorName, actorName);
+                }
+
+                private void AddActorRow(string actorName, string modelFileName)
+                {
+                    actorGrid.Rows.Add(actorName, modelFileName, "", "Delete");
+                    RefreshMainActor();
+                }
+
+                private void ImportNamesFromModelFile(object sender, EventArgs e)
+                {
+                    OpenFileDialog openDialog = new OpenFileDialog();
+                    openDialog.Title = "Choose Splatoon 3 BFRES model files";
+                    openDialog.Filter = "Splatoon 3 BFRES (*.bfres.zs;*.bfres)|*.bfres.zs;*.bfres|All files (*.*)|*.*";
+                    openDialog.Multiselect = true;
+
+                    if (openDialog.ShowDialog() != DialogResult.OK)
+                        return;
+
+                    try
+                    {
+                        List<string> actorNames = new List<string>();
+                        foreach (string fileName in openDialog.FileNames)
+                        {
+                            string modelFileName = GetModelFileName(fileName);
+                            foreach (string actorName in ReadModelNames(fileName))
+                            {
+                                if (!string.IsNullOrWhiteSpace(actorName))
+                                    actorNames.Add(actorName + "\t" + modelFileName);
+                            }
+                        }
+
+                        actorNames = actorNames
+                            .Where(name => !string.IsNullOrWhiteSpace(name))
+                            .Distinct(StringComparer.Ordinal)
+                            .ToList();
+
+                        if (actorNames.Count == 0)
+                        {
+                            MessageBox.Show("The selected BFRES files have no model names.");
+                            return;
+                        }
+
+                        subModelsEdited = false;
+                        mainActorName = null;
+                        actorGrid.Rows.Clear();
+                        foreach (string imported in actorNames)
+                        {
+                            string[] parts = imported.Split('\t');
+                            AddActorRow(parts[0], parts.Length > 1 ? parts[1] : parts[0]);
+                        }
+                        RefreshMainActor();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Failed to import model names.\n\n{ex}", "Import Model Names", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+
+                private List<string> ReadModelNames(string fileName)
+                {
+                    byte[] data = File.ReadAllBytes(fileName);
+                    if (data.Length < 4 || data[0] != (byte)'F' || data[1] != (byte)'R' || data[2] != (byte)'E' || data[3] != (byte)'S')
+                    {
+                        Zstb compression = new Zstb();
+                        compression.Init(fileName);
+                        using (MemoryStream input = new MemoryStream(data))
+                        using (Stream output = compression.Decompress(input))
+                        using (MemoryStream memory = new MemoryStream())
+                        {
+                            output.CopyTo(memory);
+                            data = memory.ToArray();
+                        }
+                    }
+
+                    using (MemoryStream stream = new MemoryStream(data))
+                    {
+                        Syroot.NintenTools.NSW.Bfres.ResFile resFile = new Syroot.NintenTools.NSW.Bfres.ResFile(stream);
+                        return resFile.Models.Select(model => model.Name).Where(name => !string.IsNullOrWhiteSpace(name)).ToList();
+                    }
+                }
+
+                private string GetModelFileName(string fileName)
+                {
+                    string name = Path.GetFileName(fileName);
+                    if (name.EndsWith(".zs", StringComparison.OrdinalIgnoreCase))
+                        name = Path.GetFileNameWithoutExtension(name);
+                    if (name.EndsWith(".bfres", StringComparison.OrdinalIgnoreCase))
+                        name = Path.GetFileNameWithoutExtension(name);
+                    return name;
+                }
+
+                private void ActorGridCellClick(object sender, DataGridViewCellEventArgs e)
+                {
+                    if (e.RowIndex < 0 || e.ColumnIndex != 3 || e.RowIndex >= actorGrid.Rows.Count || actorGrid.Rows[e.RowIndex].IsNewRow)
+                        return;
+
+                    actorGrid.Rows.RemoveAt(e.RowIndex);
+                }
+
+                private void RemoveSelectedRows(object sender, EventArgs e)
+                {
+                    foreach (DataGridViewRow row in actorGrid.SelectedRows.Cast<DataGridViewRow>().Where(row => !row.IsNewRow).ToList())
+                        actorGrid.Rows.Remove(row);
                 }
 
                 private void SubModelsTextChanged(object sender, EventArgs e)
@@ -2135,24 +2602,110 @@ namespace FirstPlugin
                         subModelsEdited = true;
                 }
 
+                private void RefreshMainActor()
+                {
+                    List<string> actorNames = GetActorNames();
+                    string nextMainActorName = actorNames.FirstOrDefault(IsMainFieldActor) ?? actorNames.FirstOrDefault() ?? "";
+                    if (nextMainActorName != mainActorName)
+                    {
+                        mainActorName = nextMainActorName;
+                        if (!subModelsEdited)
+                            SetSubModelsForActor(mainActorName);
+                    }
+
+                    foreach (DataGridViewRow row in actorGrid.Rows)
+                    {
+                        if (row.IsNewRow)
+                            continue;
+
+                        string actorName = Convert.ToString(row.Cells[0].Value)?.Trim() ?? "";
+                        string modelFileName = Convert.ToString(row.Cells[1].Value)?.Trim() ?? "";
+                        if (string.IsNullOrWhiteSpace(modelFileName))
+                            row.Cells[1].Value = actorName;
+                        row.Cells[2].Value = actorName == mainActorName ? "Uses SubModels" : "";
+                    }
+
+                    subModelsBox.Enabled = !string.IsNullOrWhiteSpace(mainActorName);
+                    subModelLabel.Text = string.IsNullOrWhiteSpace(mainActorName)
+                        ? "SubModel FMDBs"
+                        : $"SubModel FMDBs for {mainActorName}";
+                }
+
+                private bool IsMainFieldActor(string actorName)
+                {
+                    return actorName.StartsWith("Fld_", StringComparison.OrdinalIgnoreCase) &&
+                           !actorName.StartsWith("FldBG_", StringComparison.OrdinalIgnoreCase) &&
+                           !actorName.StartsWith("FldObj_", StringComparison.OrdinalIgnoreCase);
+                }
+
                 private void SetSubModelsForActor(string actorName)
                 {
                     suppressSubModelEdit = true;
-                    subModelsBox.Lines = Splatoon3ActorPackCreator.ConvertSubModelPaths(templateInfo.SubModelPaths, templateInfo.SourceActorName, actorName).ToArray();
+                    subModelsBox.Lines = Splatoon3ActorPackCreator.ConvertSubModelPaths(templateInfo.SubModelPaths, templateInfo.SourceActorName, actorName)
+                        .Where(IsFldBgSubModelPath)
+                        .ToArray();
                     suppressSubModelEdit = false;
+                }
+
+                private bool IsFldBgSubModelPath(string path)
+                {
+                    string fileName = Path.GetFileNameWithoutExtension(path ?? "");
+                    return fileName.StartsWith("FldBG_", StringComparison.OrdinalIgnoreCase);
+                }
+
+                private List<string> GetActorNames()
+                {
+                    return actorGrid.Rows
+                        .Cast<DataGridViewRow>()
+                        .Where(row => !row.IsNewRow)
+                        .Select(row => Convert.ToString(row.Cells[0].Value)?.Trim() ?? "")
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList();
+                }
+
+                public string GetModelFileNameForActor(string actorName)
+                {
+                    foreach (DataGridViewRow row in actorGrid.Rows)
+                    {
+                        if (row.IsNewRow)
+                            continue;
+
+                        string rowActorName = Convert.ToString(row.Cells[0].Value)?.Trim() ?? "";
+                        if (!string.Equals(rowActorName, actorName, StringComparison.Ordinal))
+                            continue;
+
+                        string modelFileName = Convert.ToString(row.Cells[1].Value)?.Trim() ?? "";
+                        return string.IsNullOrWhiteSpace(modelFileName) ? actorName : modelFileName;
+                    }
+
+                    return actorName;
                 }
 
                 private void Apply(object sender, EventArgs e)
                 {
-                    if (string.IsNullOrWhiteSpace(ActorName))
+                    actorGrid.EndEdit();
+                    RefreshMainActor();
+                    List<string> actorNames = ActorNames;
+                    if (actorNames.Count == 0)
                     {
-                        MessageBox.Show("Enter a new actor name.");
+                        MessageBox.Show("Add at least one actor name.");
                         return;
                     }
 
-                    if (ActorName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                    string invalidName = actorNames.FirstOrDefault(name => name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0);
+                    if (invalidName != null)
                     {
-                        MessageBox.Show("The actor name contains invalid file name characters.");
+                        MessageBox.Show($"The actor name contains invalid file name characters:\n{invalidName}");
+                        return;
+                    }
+
+                    string invalidModelFile = actorNames
+                        .Select(GetModelFileNameForActor)
+                        .FirstOrDefault(name => string.IsNullOrWhiteSpace(name) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0);
+                    if (invalidModelFile != null)
+                    {
+                        MessageBox.Show($"The model file/folder name contains invalid file name characters:\n{invalidModelFile}");
                         return;
                     }
 

@@ -262,6 +262,8 @@
     <Compile Include="FileFormats\BFRES\Splatoon3MapPorter.cs" />
     <Compile Include="FileFormats\Splatoon3\Splatoon3ActorInfoRsdbUpdater.cs" />
     <Compile Include="FileFormats\Splatoon3\Splatoon3ActorPackCreator.cs" />
+    <Compile Include="FileFormats\Splatoon3\Splatoon3CollisionReplacer.cs" />
+    <Compile Include="FileFormats\Splatoon3\Splatoon3LayoutPorter.cs" />
     <Compile Include="FileFormats\BSMAT\BSMATMaterialFile.cs" />
     <Compile Include="FileFormats\BSMAT\BSMAT.cs" />
     <Compile Include="FileFormats\BSMAT\NoFormattingConverter.cs" />

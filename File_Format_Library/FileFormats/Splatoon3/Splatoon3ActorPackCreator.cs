@@ -64,8 +64,15 @@ namespace FirstPlugin
 
         public static Splatoon3ActorPackCreateResult Create(string sourcePath, string outputPath, string targetActorName, List<string> subModelPaths)
         {
+            return Create(sourcePath, outputPath, targetActorName, targetActorName, subModelPaths);
+        }
+
+        public static Splatoon3ActorPackCreateResult Create(string sourcePath, string outputPath, string targetActorName, string targetModelFileName, List<string> subModelPaths)
+        {
             if (string.IsNullOrWhiteSpace(targetActorName))
                 throw new InvalidOperationException("Enter a target actor name.");
+            if (string.IsNullOrWhiteSpace(targetModelFileName))
+                targetModelFileName = targetActorName;
 
             SarcData sourcePack = ReadPack(sourcePath);
             if (sourcePack.HashOnly)
@@ -96,7 +103,7 @@ namespace FirstPlugin
                     int beforeCount = result.UpdatedStringCount;
                     byml.RootNode = ReplaceNodeActorReferences(byml.RootNode, sourceTokens, targetTokens, ref result.UpdatedStringCount);
                     if (IsModelInfoFile(file.Key))
-                        ApplyModelInfo(byml, targetActorName, subModelPaths ?? new List<string>());
+                        ApplyModelInfo(byml, targetActorName, targetModelFileName, subModelPaths ?? new List<string>());
                     if (result.UpdatedStringCount != beforeCount || IsModelInfoFile(file.Key))
                     {
                         fileData = SaveByml(byml);
@@ -226,12 +233,12 @@ namespace FirstPlugin
             return node;
         }
 
-        private static void ApplyModelInfo(BymlFileData byml, string targetActorName, List<string> subModelPaths)
+        private static void ApplyModelInfo(BymlFileData byml, string targetActorName, string targetModelFileName, List<string> subModelPaths)
         {
             if (!(byml.RootNode is IDictionary<string, dynamic> root))
                 root = new Dictionary<string, dynamic>();
 
-            root["Fmdb"] = GetDefaultFmdbPath(targetActorName, targetActorName);
+            root["Fmdb"] = GetDefaultFmdbPath(targetModelFileName, targetActorName);
             List<dynamic> subModels = new List<dynamic>();
             foreach (string path in subModelPaths.Select(NormalizeSubModelPath).Where(path => !string.IsNullOrWhiteSpace(path)))
             {

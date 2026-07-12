@@ -1,0 +1,18 @@
+Open the sp1 or sp2 map file in toolbox. Delete the Rails by right clicking on the "rails" entry and clicking "Delete node". (if it doesn't work, do it yourself).
+Export as .yaml.
+Rename it to OldLayout.yaml
+Run my tool (have to located in the same folder as the .yaml file)
+Open the new yaml file (Sp3Layout.yaml)
+Delete the entire line for "Objs:", so that it looks like that:
+
+HasReferenceNodes: false
+IsBigEndian: false
+SupportPaths: false
+Version: 7
+root:
+  Actors:
+    - Gyaml:
+
+Bulk edit and replace ' with nothing.
+Copy-paste it into a sp3 map in toolbox.
+Enjoy

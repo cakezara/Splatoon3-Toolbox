@@ -136,9 +136,17 @@ namespace Toolbox
 
             UpdateDiscordPresence(GetActiveIFileFormat());
 
-            ThreadStart t = new ThreadStart(UpdateProgram.CheckLatest);
-            Thread thread = new Thread(t);
-            thread.Start();
+            if (!IsThunderBuild())
+            {
+                ThreadStart t = new ThreadStart(UpdateProgram.CheckLatest);
+                Thread thread = new Thread(t);
+                thread.Start();
+            }
+            else
+            {
+                updateToolstrip.Visible = false;
+                updateToolstrip.Enabled = false;
+            }
 
             Application.Idle += Application_Idle;
 
@@ -230,8 +238,16 @@ namespace Toolbox
 
         #region Updater
         bool UsePrompt = true;
+        private bool IsThunderBuild()
+        {
+            return string.Equals(Runtime.ProgramVersion, "Thunder", StringComparison.OrdinalIgnoreCase);
+        }
+
         private void Application_Idle(object sender, EventArgs e)
         {
+            if (IsThunderBuild())
+                return;
+
             if (UpdateProgram.CanUpdate && Runtime.EnableVersionCheck && UsePrompt)
             {
                 updateToolstrip.Enabled = true;
@@ -243,6 +259,9 @@ namespace Toolbox
 
         private void UpdateNotifcationClick()
         {
+            if (IsThunderBuild())
+                return;
+
             if (!UpdateProgram.CanUpdate)
                 return;
 
@@ -1409,6 +1428,9 @@ namespace Toolbox
         }
 
         private void updateToolstrip_Click(object sender, EventArgs e) {
+            if (IsThunderBuild())
+                return;
+
             UpdateNotifcationClick();
         }
 

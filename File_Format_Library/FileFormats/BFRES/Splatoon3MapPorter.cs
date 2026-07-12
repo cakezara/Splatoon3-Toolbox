@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Windows.Forms;
 using Toolbox.Library;
 
 namespace FirstPlugin
@@ -321,6 +322,7 @@ namespace FirstPlugin
             {
                 for (int i = 0; i < sourceModels.Count; i++)
                 {
+                    PumpMessages();
                     FMDL sourceModel = sourceModels[i];
                     FMDL targetModel = targetModels[i];
 
@@ -334,17 +336,17 @@ namespace FirstPlugin
                     string modelPath = Path.Combine(temporaryDirectory, i + ".bfmdl");
                     sourceModel.Export(modelPath);
                     targetModel.Replace(modelPath, targetModel.GetResFile(), null);
-
-                    if (targetModel.shapes.Any(shape => shape.VertexSkinCount != 0 || shape.BoneIndex != 0 || shape.BoneIndices.Count != 0))
-                        throw new InvalidOperationException($"{sourceModel.Text} contains skinned geometry that cannot use the Splatoon 3 target skeleton.");
+                    FlattenImportedModelSkinning(targetModel);
 
                     targetModel.Nodes.Remove(targetModel.Skeleton.node);
                     targetModel.Skeleton = targetSkeleton;
                     targetModel.Nodes.Insert(Math.Min(2, targetModel.Nodes.Count), targetSkeleton.node);
                     targetModel.Model.Skeleton = targetSkeleton.node.Skeleton;
+                    RenameRootBoneToModelName(targetModel);
                     targetModel.Model.Path = targetPath;
                     targetModel.Model.UserData = targetUserData;
                     targetModel.Model.UserDataDict = targetUserDataDict;
+                    PumpMessages();
                 }
             }
             finally
@@ -361,6 +363,62 @@ namespace FirstPlugin
                     File.Delete(file);
                 Directory.Delete(temporaryDirectory);
             }
+        }
+
+        private static void FlattenImportedModelSkinning(FMDL model)
+        {
+            foreach (FSHP shape in model.shapes)
+                FlattenImportedShapeSkinning(shape);
+        }
+
+        private static void RenameRootBoneToModelName(FMDL model)
+        {
+            if (model?.Skeleton?.bones == null || model.Skeleton.bones.Count == 0)
+                return;
+
+            if (model.Skeleton.bones[0] is BfresBone rootBone)
+                rootBone.RenameBone(model.Text);
+            else
+                model.Skeleton.bones[0].Text = model.Text;
+        }
+
+        private static void FlattenImportedShapeSkinning(FSHP shape)
+        {
+            shape.VertexSkinCount = 0;
+            shape.BoneIndex = 0;
+            shape.BoneIndices.Clear();
+
+            if (shape.Shape != null)
+            {
+                shape.Shape.VertexSkinCount = 0;
+                shape.Shape.BoneIndex = 0;
+                if (shape.Shape.SkinBoneIndices == null)
+                    shape.Shape.SkinBoneIndices = new List<ushort>();
+                else
+                    shape.Shape.SkinBoneIndices.Clear();
+            }
+
+            if (shape.VertexBuffer != null)
+                shape.VertexBuffer.VertexSkinCount = 0;
+
+            if (shape.vertices != null)
+            {
+                foreach (Toolbox.Library.Rendering.Vertex vertex in shape.vertices)
+                {
+                    vertex.boneIds.Clear();
+                    vertex.boneWeights.Clear();
+                }
+            }
+
+            shape.vertexAttributes.RemoveAll(attribute =>
+                attribute.Name.StartsWith("_i", StringComparison.OrdinalIgnoreCase) ||
+                attribute.Name.StartsWith("_w", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static void PumpMessages()
+        {
+            if (Application.MessageLoop)
+                Application.DoEvents();
         }
 
         public static List<Splatoon3TextureTransfer> AnalyzeTextures(BFRES sourceBfres, BFRES targetBfres, List<FMDL> sourceModels, string materialsFolder)
@@ -463,6 +521,7 @@ namespace FirstPlugin
             {
                 for (int index = 0; index < transfers.Count; index++)
                 {
+                    PumpMessages();
                     Splatoon3TextureTransfer transfer = transfers[index];
                     string texturePath = Path.Combine(temporaryDirectory, index + ".bftex");
 
@@ -495,6 +554,7 @@ namespace FirstPlugin
                             throw new InvalidOperationException($"Failed to import {transfer.TextureName} through BFTEX.");
                         result.Added++;
                     }
+                    PumpMessages();
                 }
             }
             finally
@@ -558,6 +618,7 @@ namespace FirstPlugin
                 StringComparer.OrdinalIgnoreCase);
             foreach (TextureData texture in targetBntx.Textures.Values.ToList())
             {
+                PumpMessages();
                 if (IsReferencedTexture(texture.Text, referencedTextures) || retainedTextureNames.Contains(texture.Text))
                     continue;
 
@@ -576,6 +637,7 @@ namespace FirstPlugin
 
             foreach (string textureName in referencedTextures.OrderBy(name => name))
             {
+                PumpMessages();
                 if (targetBntx.Textures.ContainsKey(textureName) ||
                     targetBntx.Textures.Keys.Any(name => IsReferencedTexture(name, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { textureName })))
                     continue;
@@ -630,7 +692,9 @@ namespace FirstPlugin
 
             using (MemoryStream bfresStream = new MemoryStream())
             {
+                PumpMessages();
                 targetBfres.Save(bfresStream);
+                PumpMessages();
                 byte[] bfresData = bfresStream.ToArray();
 
                 using (MemoryStream reloadStream = new MemoryStream(bfresData))
