@@ -336,13 +336,21 @@ namespace FirstPlugin
                     string modelPath = Path.Combine(temporaryDirectory, i + ".bfmdl");
                     sourceModel.Export(modelPath);
                     targetModel.Replace(modelPath, targetModel.GetResFile(), null);
-                    FlattenImportedModelSkinning(targetModel);
+                    if (ShouldPreserveImportedSkeleton(sourceModel, targetModel))
+                    {
+                        targetModel.Skeleton.reset();
+                        targetModel.Skeleton.CalculateIndices();
+                    }
+                    else
+                    {
+                        FlattenImportedModelSkinning(targetModel);
+                        targetModel.Nodes.Remove(targetModel.Skeleton.node);
+                        targetModel.Skeleton = targetSkeleton;
+                        targetModel.Nodes.Insert(Math.Min(2, targetModel.Nodes.Count), targetSkeleton.node);
+                        targetModel.Model.Skeleton = targetSkeleton.node.Skeleton;
+                        RenameRootBoneToModelName(targetModel);
+                    }
 
-                    targetModel.Nodes.Remove(targetModel.Skeleton.node);
-                    targetModel.Skeleton = targetSkeleton;
-                    targetModel.Nodes.Insert(Math.Min(2, targetModel.Nodes.Count), targetSkeleton.node);
-                    targetModel.Model.Skeleton = targetSkeleton.node.Skeleton;
-                    RenameRootBoneToModelName(targetModel);
                     targetModel.Model.Path = targetPath;
                     targetModel.Model.UserData = targetUserData;
                     targetModel.Model.UserDataDict = targetUserDataDict;
@@ -363,6 +371,45 @@ namespace FirstPlugin
                     File.Delete(file);
                 Directory.Delete(temporaryDirectory);
             }
+        }
+
+        private static bool ShouldPreserveImportedSkeleton(FMDL sourceModel, FMDL targetModel)
+        {
+            if (!IsAnimatedModelName(sourceModel?.Text) && !IsAnimatedModelName(targetModel?.Text))
+                return false;
+
+            return HasImportedSkeletonData(sourceModel);
+        }
+
+        private static bool IsAnimatedModelName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return false;
+
+            return name.IndexOf("Flag", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool HasImportedSkeletonData(FMDL model)
+        {
+            if (model?.Skeleton?.bones == null)
+                return false;
+
+            if (model.Skeleton.bones.Count > 1)
+                return true;
+
+            foreach (FSHP shape in model.shapes)
+            {
+                if (shape?.Shape?.SkinBoneIndices != null && shape.Shape.SkinBoneIndices.Count > 0)
+                    return true;
+
+                if (shape?.vertexAttributes != null &&
+                    shape.vertexAttributes.Any(attribute =>
+                        attribute.Name.StartsWith("_i", StringComparison.OrdinalIgnoreCase) ||
+                        attribute.Name.StartsWith("_w", StringComparison.OrdinalIgnoreCase)))
+                    return true;
+            }
+
+            return false;
         }
 
         private static void FlattenImportedModelSkinning(FMDL model)
@@ -987,6 +1034,7 @@ namespace FirstPlugin
             foreach (FSHP shape in model.shapes)
                 shape.TransformPosition(Vector3.Zero, Vector3.Zero, scaleVector);
 
+            ScaleSkeleton(model, scale);
             model.Skeleton.reset();
             model.Skeleton.CalculateIndices();
 
@@ -998,6 +1046,19 @@ namespace FirstPlugin
 
             model.IsEdited = true;
             model.UpdateVertexData();
+        }
+
+        private static void ScaleSkeleton(FMDL model, float scale)
+        {
+            if (model?.Skeleton?.bones == null)
+                return;
+
+            foreach (STBone bone in model.Skeleton.bones)
+            {
+                bone.Position *= scale;
+                if (bone is BfresBone bfresBone)
+                    bfresBone.GenericToBfresBone();
+            }
         }
 
         private static string GetSignature(FMAT material, string opaTextureName)

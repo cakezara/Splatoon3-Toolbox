@@ -391,6 +391,9 @@ namespace Toolbox.Library
                     {
                         if (drawable is STSkeleton)
                         {
+                            if (!CanApplySkeletalAnimation(currentAnimation, (STSkeleton)drawable))
+                                continue;
+
                             currentAnimation.SetFrame(animFrameNum);
                             currentAnimation.NextFrame((STSkeleton)drawable);
                         }
@@ -562,6 +565,41 @@ namespace Toolbox.Library
                 currentFrameUpDown.Value--; 
                 OnFrameAdvanced(); 
             }
+        }
+
+        private bool CanApplySkeletalAnimation(Animation anim, STSkeleton skeleton)
+        {
+            if (anim?.Bones == null || skeleton?.bones == null)
+                return false;
+
+            int matched = 0;
+            bool matchedNonRoot = false;
+            bool hasNonRoot = false;
+
+            foreach (var bone in anim.Bones)
+            {
+                if (bone == null || string.IsNullOrWhiteSpace(bone.Text))
+                    continue;
+
+                bool isRoot = string.Equals(bone.Text, "Root", StringComparison.OrdinalIgnoreCase);
+                if (!isRoot)
+                    hasNonRoot = true;
+
+                if (skeleton.GetBone(bone.Text) == null)
+                    continue;
+
+                matched++;
+                if (!isRoot)
+                    matchedNonRoot = true;
+            }
+
+            if (matched == 0)
+                return false;
+
+            if (hasNonRoot && !matchedNonRoot)
+                return false;
+
+            return true;
         }
     }
 }

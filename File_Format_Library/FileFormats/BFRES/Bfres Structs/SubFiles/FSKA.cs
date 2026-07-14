@@ -58,12 +58,91 @@ namespace Bfres.Structs
             Items.AddRange(base.GetContextMenuItems());
             Items.Add(new ToolStripMenuItem("Copy", null, CopyAction, Keys.Control | Keys.C));
             Items.Add(new ToolStripMenuItem("New Bone Target", null, NewAction, Keys.Control | Keys.W));
+            Items.Add(new ToolStripMenuItem("Replace Splatoon 2 FSKA Scaled 0.1", null, ReplaceScaledSplatoon2Action));
             return Items.ToArray();
         }
 
         protected void CopyAction(object sender, EventArgs e) { CopyAnimForm(); }
 
         protected void NewAction(object sender, EventArgs e) { NewBoneAnim(); }
+
+        protected void ReplaceScaledSplatoon2Action(object sender, EventArgs e) { ReplaceScaledSplatoon2Fska(); }
+
+        public void ReplaceScaledSplatoon2Fska()
+        {
+            OpenFileDialog ofd = new OpenFileDialog();
+            ofd.Filter = FileFilters.FSKA_REPLACE;
+            if (ofd.ShowDialog() != DialogResult.OK)
+                return;
+
+            Replace(ofd.FileName);
+            ScaleSkeletalTranslations(0.1f);
+            IsEdited = true;
+        }
+
+        public void ScaleSkeletalTranslations(float scale)
+        {
+            if (SkeletalAnim != null)
+                ScaleSkeletalTranslations(SkeletalAnim, scale);
+            if (SkeletalAnimU != null)
+                ScaleSkeletalTranslations(SkeletalAnimU, scale);
+
+            OpenAnimationData();
+            IsEdited = true;
+        }
+
+        private void ScaleSkeletalTranslations(SkeletalAnim ska, float scale)
+        {
+            foreach (BoneAnim boneAnim in ska.BoneAnims)
+            {
+                BoneAnimData baseData = boneAnim.BaseData;
+                baseData.Translate = new Syroot.Maths.Vector3F(
+                    boneAnim.BaseData.Translate.X * scale,
+                    boneAnim.BaseData.Translate.Y * scale,
+                    boneAnim.BaseData.Translate.Z * scale);
+                boneAnim.BaseData = baseData;
+
+                foreach (AnimCurve curve in boneAnim.Curves)
+                {
+                    if (!IsTranslationTrack(curve.AnimDataOffset))
+                        continue;
+
+                    curve.Scale *= scale;
+                    curve.Offset *= scale;
+                    curve.Delta *= scale;
+                }
+            }
+        }
+
+        private void ScaleSkeletalTranslations(ResU.SkeletalAnim ska, float scale)
+        {
+            foreach (ResU.BoneAnim boneAnim in ska.BoneAnims)
+            {
+                ResU.BoneAnimData baseData = boneAnim.BaseData;
+                baseData.Translate = new Syroot.Maths.Vector3F(
+                    boneAnim.BaseData.Translate.X * scale,
+                    boneAnim.BaseData.Translate.Y * scale,
+                    boneAnim.BaseData.Translate.Z * scale);
+                boneAnim.BaseData = baseData;
+
+                foreach (ResU.AnimCurve curve in boneAnim.Curves)
+                {
+                    if (!IsTranslationTrack(curve.AnimDataOffset))
+                        continue;
+
+                    curve.Scale *= scale;
+                    curve.Offset *= scale;
+                    curve.Delta *= scale;
+                }
+            }
+        }
+
+        private bool IsTranslationTrack(uint animDataOffset)
+        {
+            return animDataOffset == (uint)TrackType.XPOS ||
+                   animDataOffset == (uint)TrackType.YPOS ||
+                   animDataOffset == (uint)TrackType.ZPOS;
+        }
 
         public void NewBoneAnim()
         {

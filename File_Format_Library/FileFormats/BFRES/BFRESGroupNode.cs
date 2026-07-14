@@ -86,6 +86,7 @@ namespace Bfres.Structs
             if (Type == BRESGroupType.SkeletalAnim)
             {
                 Items.Add(new STToolStripSeparator());
+                Items.Add(new STToolStipMenuItem("Import Splatoon 2 Scaled 0.1", null, ImportScaledSplatoon2SkeletalAnimAction, Keys.None));
                 Items.Add(new STToolStipMenuItem("Batch Edit Base Data", null, BatchEditBaseAnimDataAction, Keys.Control | Keys.A));
             }
 
@@ -102,6 +103,12 @@ namespace Bfres.Structs
         protected void ShowAllModelsAction(object sender, EventArgs e) { ShowAllModels(); }
 
         protected void BatchEditBaseAnimDataAction(object sender, EventArgs e) { BatchEditBaseAnimData(); }
+
+        protected void ImportScaledSplatoon2SkeletalAnimAction(object sender, EventArgs e)
+        {
+            if (Parent is BFRESAnimFolder)
+                ((BFRESAnimFolder)Parent).ImportScaledSplatoon2SkeletalAnim();
+        }
 
         private void BatchEditBaseAnimData()
         {

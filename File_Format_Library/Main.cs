@@ -238,8 +238,14 @@ namespace FirstPlugin
                     cancelButton.Width = 90;
                     cancelButton.DialogResult = DialogResult.Cancel;
 
+                    Button importFolderButton = new Button();
+                    importFolderButton.Text = "Import BPHSH Folder";
+                    importFolderButton.Width = 150;
+                    importFolderButton.Click += ImportFolderButton_Click;
+
                     buttons.Controls.Add(okButton);
                     buttons.Controls.Add(cancelButton);
+                    buttons.Controls.Add(importFolderButton);
                     Controls.Add(grid);
                     Controls.Add(buttons);
                     AcceptButton = okButton;
@@ -264,6 +270,77 @@ namespace FirstPlugin
                     openDialog.Filter = "Phive shape collision (*.bphsh)|*.bphsh|All files (*.*)|*.*";
                     if (openDialog.ShowDialog() == DialogResult.OK)
                         grid.Rows[e.RowIndex].Cells["CollisionPath"].Value = openDialog.FileName;
+                }
+
+                private void ImportFolderButton_Click(object sender, EventArgs e)
+                {
+                    FolderBrowserDialog folderDialog = new FolderBrowserDialog();
+                    folderDialog.Description = "Choose a folder containing replacement .bphsh files";
+                    if (folderDialog.ShowDialog() != DialogResult.OK)
+                        return;
+
+                    string[] files = Directory.GetFiles(folderDialog.SelectedPath, "*.bphsh", SearchOption.TopDirectoryOnly);
+                    Dictionary<string, string> exactFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    Dictionary<string, string> normalizedFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                    foreach (string file in files)
+                    {
+                        string name = Path.GetFileNameWithoutExtension(file);
+                        if (!exactFiles.ContainsKey(name))
+                            exactFiles.Add(name, file);
+
+                        string normalizedName = NormalizeScaledName(name);
+                        if (!normalizedFiles.ContainsKey(normalizedName) || name.EndsWith("_Scaled", StringComparison.OrdinalIgnoreCase))
+                            normalizedFiles[normalizedName] = file;
+                    }
+
+                    int matched = 0;
+                    List<string> unmatched = new List<string>();
+
+                    foreach (DataGridViewRow row in grid.Rows)
+                    {
+                        string packPath = Convert.ToString(row.Cells["PackPath"].Value)?.Trim() ?? "";
+                        string actorName = GetActorNameFromPackPath(packPath);
+                        if (string.IsNullOrWhiteSpace(actorName))
+                            continue;
+
+                        string collisionPath;
+                        if (!exactFiles.TryGetValue(actorName, out collisionPath) &&
+                            !exactFiles.TryGetValue(actorName + "_Scaled", out collisionPath) &&
+                            !normalizedFiles.TryGetValue(NormalizeScaledName(actorName), out collisionPath))
+                        {
+                            unmatched.Add(actorName);
+                            continue;
+                        }
+
+                        row.Cells["CollisionPath"].Value = collisionPath;
+                        matched++;
+                    }
+
+                    string message = $"Matched {matched} of {grid.Rows.Count} actor packs.";
+                    if (unmatched.Count > 0)
+                        message += "\n\nUnmatched:\n" + string.Join("\n", unmatched);
+                    MessageBox.Show(message, "Import BPHSH Folder", MessageBoxButtons.OK, unmatched.Count == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                }
+
+                private string GetActorNameFromPackPath(string packPath)
+                {
+                    if (string.IsNullOrWhiteSpace(packPath))
+                        return "";
+
+                    string fileName = Path.GetFileName(packPath);
+                    if (fileName.EndsWith(".zs", StringComparison.OrdinalIgnoreCase))
+                        fileName = fileName.Substring(0, fileName.Length - 3);
+                    if (fileName.EndsWith(".pack", StringComparison.OrdinalIgnoreCase))
+                        fileName = fileName.Substring(0, fileName.Length - 5);
+                    return fileName;
+                }
+
+                private string NormalizeScaledName(string name)
+                {
+                    if (string.IsNullOrWhiteSpace(name))
+                        return "";
+                    return name.EndsWith("_Scaled", StringComparison.OrdinalIgnoreCase) ? name.Substring(0, name.Length - 7) : name;
                 }
 
                 private void OkButton_Click(object sender, EventArgs e)
@@ -576,6 +653,8 @@ namespace FirstPlugin
                         }
                     }
 
+                    List<FSKA> sourceSkeletalAnimations = GetSelectedSourceSkeletalAnimations(sources, selectedSourceModels);
+
                     List<string> materialsNotSelected = analysis.MaterialProposals
                         .Where(proposal => !selectedMaterialReplacements.Contains(proposal))
                         .Select(proposal => $"{proposal.Model.Text}/{proposal.Material.Text} ({proposal.Status})")
@@ -592,7 +671,7 @@ namespace FirstPlugin
                         .Select((model, index) => $"{sourceModelLabels[model]} -> {selectedTargetModels[index].Text}"));
 
                     DialogResult result = MessageBox.Show(
-                        $"Port the selected Splatoon 2 geometry into the active Splatoon 3 BFRES?\n\nSource files: {sources.Count}\nSelected models: {selectedSourceModels.Count}\nSource models: {sourceModels.Count}\nOriginal target models: {originalTargetModelCount}\nNew target model slots added: {addedTargetModelCount}\nTarget models after adding slots: {targetModels.Count}\nShapes: {analysis.ShapeCount}\nMaterials: {analysis.MaterialCount}\nMaterial replacements selected: {selectedMaterialReplacements.Count}\nMaterials left unchanged: {analysis.MaterialCount - selectedMaterialReplacements.Count}\nTextures selected for BFTEX import: {selectedTextureTransfers.Count}\nTextures to add: {selectedTextureTransfers.Count(transfer => !transfer.ReplacesExisting)}\nTextures to replace: {selectedTextureTransfers.Count(transfer => transfer.ReplacesExisting)}\n\nModel mapping:\n{modelMapping}\n\nNot selected for replacement:\n{unmatchedPreview}\n\nMapped target skeletons and model metadata remain unchanged.",
+                        $"Port the selected Splatoon 2 geometry into the active Splatoon 3 BFRES?\n\nSource files: {sources.Count}\nSelected models: {selectedSourceModels.Count}\nSource models: {sourceModels.Count}\nOriginal target models: {originalTargetModelCount}\nNew target model slots added: {addedTargetModelCount}\nTarget models after adding slots: {targetModels.Count}\nShapes: {analysis.ShapeCount}\nMaterials: {analysis.MaterialCount}\nMaterial replacements selected: {selectedMaterialReplacements.Count}\nMaterials left unchanged: {analysis.MaterialCount - selectedMaterialReplacements.Count}\nTextures selected for BFTEX import: {selectedTextureTransfers.Count}\nTextures to add: {selectedTextureTransfers.Count(transfer => !transfer.ReplacesExisting)}\nTextures to replace: {selectedTextureTransfers.Count(transfer => transfer.ReplacesExisting)}\nS2 skeletal animations found in selected sources: {sourceSkeletalAnimations.Count}\n\nModel mapping:\n{modelMapping}\n\nNot selected for replacement:\n{unmatchedPreview}",
                         "Port Splatoon 2 Map",
                         MessageBoxButtons.YesNo,
                         MessageBoxIcon.Warning);
@@ -667,6 +746,9 @@ namespace FirstPlugin
                         PumpMessages();
                         Splatoon3MapPorter.ValidateTextureReferences(targetBfres, targetModels, textureResult);
                         PumpMessages();
+                        portStage = "importing Splatoon 2 skeletal animations from the selected sources";
+                        int importedSkeletalAnimations = ImportScaledSplatoon2SkeletalAnimations(targetBfres, sourceSkeletalAnimations);
+                        PumpMessages();
                         portStage = "validating the BFRES save";
                         Splatoon3MapPorter.ValidateSave(targetBfres, targetAnalysis.Replacements, selectedTextureTransfers);
                         PumpMessages();
@@ -679,7 +761,7 @@ namespace FirstPlugin
                             missingTextureSummary += $"\n...and {textureResult.MissingTextures.Count - 16} more";
 
                         string completionMessage =
-                            $"Map port complete.\n\nTarget models replaced: {selectedSourceModels.Count}\nNew target model slots added: {addedTargetModelCount}\nTarget models left unchanged: {targetModels.Count - selectedSourceModels.Count}\nShapes scaled: {targetAnalysis.ShapeCount}\nSplatoon 3 skeletons preserved: {selectedTargetModels.Count}\nMaterials replaced from BFMAT: {targetAnalysis.Replacements.Count}\nTextures added through BFTEX: {textureResult.Added}\nTextures replaced through BFTEX: {textureResult.Replaced}\nUnreferenced target textures removed: {textureResult.Removed}\nMissing final texture files: {textureResult.MissingTextures.Count}\n\nMissing texture files:\n{missingTextureSummary}\n\nThe active Splatoon 3 BFRES was modified. Save it normally when ready. The Splatoon 2 source was not modified.";
+                            $"Map port complete.\n\nTarget models replaced: {selectedSourceModels.Count}\nNew target model slots added: {addedTargetModelCount}\nTarget models left unchanged: {targetModels.Count - selectedSourceModels.Count}\nShapes scaled: {targetAnalysis.ShapeCount}\nMaterials replaced from BFMAT: {targetAnalysis.Replacements.Count}\nTextures added through BFTEX: {textureResult.Added}\nTextures replaced through BFTEX: {textureResult.Replaced}\nS2 skeletal animations imported/scaled: {importedSkeletalAnimations}\nUnreferenced target textures removed: {textureResult.Removed}\nMissing final texture files: {textureResult.MissingTextures.Count}\n\nMissing texture files:\n{missingTextureSummary}\n\nThe active Splatoon 3 BFRES was modified. Save it normally when ready. The Splatoon 2 source was not modified.";
                         MessageBox.Show(
                             completionMessage,
                             textureResult.MissingTextures.Count == 0 ? "Map Port Complete" : "Map Port Complete - Missing Textures",
@@ -710,6 +792,76 @@ namespace FirstPlugin
                         source.SourceContainer?.Unload();
                     }
                 }
+            }
+
+            private List<FSKA> GetSelectedSourceSkeletalAnimations(List<Splatoon2MapPortSource> sources, List<FMDL> selectedSourceModels)
+            {
+                List<FSKA> animations = new List<FSKA>();
+                HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (Splatoon2MapPortSource source in sources ?? new List<Splatoon2MapPortSource>())
+                {
+                    if (source?.SourceBfres == null || source.Models == null || !source.Models.Any(model => selectedSourceModels.Contains(model)))
+                        continue;
+
+                    foreach (FSKA animation in GetBfresSkeletalAnimations(source.SourceBfres))
+                    {
+                        string key = source.FileName + "\0" + animation.Text;
+                        if (seen.Add(key))
+                            animations.Add(animation);
+                    }
+                }
+
+                return animations;
+            }
+
+            private List<FSKA> GetBfresSkeletalAnimations(BFRES bfres)
+            {
+                List<FSKA> animations = new List<FSKA>();
+
+                foreach (BFRESAnimFolder animFolder in bfres.Nodes.OfType<BFRESAnimFolder>())
+                {
+                    foreach (BFRESGroupNode group in animFolder.Nodes.OfType<BFRESGroupNode>())
+                    {
+                        if (group.Type != BRESGroupType.SkeletalAnim)
+                            continue;
+
+                        foreach (FSKA animation in group.Nodes.OfType<FSKA>())
+                        {
+                            if (!animations.Contains(animation))
+                                animations.Add(animation);
+                        }
+                    }
+                }
+
+                return animations;
+            }
+
+            private int ImportScaledSplatoon2SkeletalAnimations(BFRES targetBfres, IEnumerable<FSKA> sourceAnimations)
+            {
+                List<FSKA> animations = sourceAnimations?
+                    .Where(animation => animation != null)
+                    .ToList() ?? new List<FSKA>();
+
+                if (animations.Count == 0)
+                    return 0;
+
+                BFRESAnimFolder animFolder = targetBfres.Nodes.OfType<BFRESAnimFolder>().FirstOrDefault();
+                if (animFolder == null)
+                {
+                    animFolder = new BFRESAnimFolder();
+                    animFolder.LoadMenus(false);
+                    targetBfres.Nodes.Add(animFolder);
+                }
+                else
+                {
+                    animFolder.LoadMenus(false);
+                }
+
+                int imported = animFolder.ImportScaledSplatoon2SkeletalAnimsFromSources(animations);
+                targetBfres.CanSave = true;
+                LibraryGUI.UpdateViewport();
+                return imported;
             }
 
             private void ApplyPaintFix(object sender, EventArgs e)

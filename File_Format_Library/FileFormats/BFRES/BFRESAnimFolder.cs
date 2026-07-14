@@ -71,6 +71,7 @@ namespace Bfres.Structs
 
             Items.Add(new ToolStripMenuItem("Import", null,
               new ToolStripMenuItem("Skeletal Animation", null, ImportSkeletalAnimAction),
+              new ToolStripMenuItem("Splatoon 2 Skeletal Animation Scaled 0.1", null, ImportScaledSplatoon2SkeletalAnimAction),
               new ToolStripMenuItem("Shader Param Animation", null, ImportShaderParamAnimAction),
               new ToolStripMenuItem("Color Animation", null, ImportColorAnimAction),
               new ToolStripMenuItem("Texture SRT Animations", null, ImportTexSrtAnimAction),
@@ -98,6 +99,7 @@ namespace Bfres.Structs
         protected void NewSceneAnimAction(object sender, EventArgs e) { NewSceneAnim(); }
 
         protected void ImportSkeletalAnimAction(object sender, EventArgs e) { ImportSkeletalAnim(); }
+        protected void ImportScaledSplatoon2SkeletalAnimAction(object sender, EventArgs e) { ImportScaledSplatoon2SkeletalAnim(); }
         protected void ImportShaderParamAnimAction(object sender, EventArgs e) { ImportShaderParamAnim(); }
         protected void ImportColorAnimAction(object sender, EventArgs e) { ImportColorAnim(); }
         protected void ImportTexSrtAnimAction(object sender, EventArgs e) { ImportTexSrtAnim(); }
@@ -119,6 +121,89 @@ namespace Bfres.Structs
             BFRESGroupNode group = GetOrCreateFolder<FSKA>();
             group.Import(ofd.FileNames, GetResFile(), GetResFileU());
             AddFolder(group);
+        }
+
+        public void ImportScaledSplatoon2SkeletalAnim()
+        {
+            if (IsWiiU)
+            {
+                MessageBox.Show("This importer is only for Switch/Splatoon 3 BFRES files.", "Splatoon 2 Skeletal Animation", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            OpenFileDialog ofd = new OpenFileDialog();
+            ofd.Filter = FileFilters.FSKA_REPLACE;
+            ofd.Multiselect = true;
+
+            if (ofd.ShowDialog() != DialogResult.OK)
+                return;
+
+            ImportScaledSplatoon2SkeletalAnims(ofd.FileNames);
+        }
+
+        public int ImportScaledSplatoon2SkeletalAnims(IEnumerable<string> fileNames)
+        {
+            if (IsWiiU)
+                throw new InvalidOperationException("This importer is only for Switch/Splatoon 3 BFRES files.");
+
+            BFRESGroupNode group = GetOrCreateFolder<FSKA>();
+            int imported = 0;
+
+            foreach (string fileName in fileNames ?? new string[0])
+            {
+                if (string.IsNullOrWhiteSpace(fileName))
+                    continue;
+
+                ImportScaledSplatoon2SkeletalAnimFile(group, fileName, System.IO.Path.GetFileNameWithoutExtension(fileName));
+                imported++;
+            }
+
+            AddFolder(group);
+            return imported;
+        }
+
+        public int ImportScaledSplatoon2SkeletalAnimsFromSources(IEnumerable<FSKA> sourceAnims)
+        {
+            if (IsWiiU)
+                throw new InvalidOperationException("This importer is only for Switch/Splatoon 3 BFRES files.");
+
+            BFRESGroupNode group = GetOrCreateFolder<FSKA>();
+            int imported = 0;
+            string temporaryDirectory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Splatoon3MapPort_FSKA_" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(temporaryDirectory);
+
+            try
+            {
+                foreach (FSKA sourceAnim in sourceAnims ?? new FSKA[0])
+                {
+                    if (sourceAnim == null)
+                        continue;
+
+                    string tempPath = System.IO.Path.Combine(temporaryDirectory, imported + ".bfska");
+                    sourceAnim.Export(tempPath);
+                    ImportScaledSplatoon2SkeletalAnimFile(group, tempPath, sourceAnim.Text);
+                    imported++;
+                }
+            }
+            finally
+            {
+                foreach (string file in System.IO.Directory.GetFiles(temporaryDirectory))
+                    System.IO.File.Delete(file);
+                System.IO.Directory.Delete(temporaryDirectory);
+            }
+
+            AddFolder(group);
+            return imported;
+        }
+
+        private void ImportScaledSplatoon2SkeletalAnimFile(BFRESGroupNode group, string fileName, string animationName)
+        {
+            FSKA fska = new FSKA();
+            fska.Text = group.SearchDuplicateName(string.IsNullOrWhiteSpace(animationName) ? System.IO.Path.GetFileNameWithoutExtension(fileName) : animationName);
+            fska.SkeletalAnim = new ResNX.SkeletalAnim();
+            fska.Replace(fileName, GetResFile(), GetResFileU());
+            fska.ScaleSkeletalTranslations(0.1f);
+            group.Nodes.Add(fska);
         }
 
         public void ImportShaderParamAnim()
